@@ -18,7 +18,7 @@ import statistics
 
 from . import attention
 from .chart_attention import KIND_NAMES
-from .explain import JUDGEMENT_WORDS, _acceptable, spoken_header
+from .explain import JUDGEMENT_WORDS, _acceptable, model_kwargs, spoken_header
 from .models import OverviewFacts, SheetModel, TextResponse
 
 CUE_NAMES = {
@@ -189,13 +189,14 @@ def polish_overview(facts: OverviewFacts, timeout: float = 5.0) -> TextResponse:
     try:
         import anthropic
 
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
         client = anthropic.Anthropic()
         response = client.with_options(timeout=timeout).messages.create(
-            model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-5"),
+            model=model,
             max_tokens=256,
             system=SYSTEM,
-            output_config={"effort": "low"},
             messages=[{"role": "user", "content": payload}],
+            **model_kwargs(model),
         )
         text = "".join(b.text for b in response.content if b.type == "text").strip()
     except Exception:
