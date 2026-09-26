@@ -45,19 +45,47 @@ const WELCOME =
   "Welcome. Press L to open the demo sheet, or U to upload your own spreadsheet. " +
   "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
-const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "Escape"]);
+const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "1", "2", "3", "Escape"]);
 // Vercel rejects bodies over about 4.5 MB before the server sees them, so we
 // check first and say so, rather than failing with no explanation.
 const MAX_UPLOAD_BYTES = 4_000_000;
 
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
-  "Space goes to the first flagged cell. " +
-  "N jumps to the next flagged cell, Shift N to the previous one. " +
+  "Space or N jumps to the next flagged cell; with Shift, the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
-  "R reads the whole row, C the whole column. L loads the demo sheet. " +
-  "U uploads your own spreadsheet. " +
-  "Escape stops speaking.";
+  "R reads the whole row, C the whole column. " +
+  "1 is Explore mode, 2 is Concise mode, 3 is Trend Scan. " +
+  "F changes which cues you hear. " +
+  "L loads the demo sheet. U uploads your own spreadsheet. Escape stops speaking.";
+
+// ---------- Modes and filters (see CLAUDE.md, "Modes and commands") ----------
+// A mode changes how moving is narrated; it stays until changed.
+const MODES = {
+  explore: { name: "Explore", says: "Explore mode. Full context for every cell." },
+  concise: { name: "Concise", says: "Concise mode. Values only; cues still speak." },
+  scan: {
+    name: "Trend Scan",
+    says: "Trend Scan. Numbers are silent. R plays the row as tones, C the column.",
+  },
+};
+// F cycles these. A filter scopes both where N and Space go and which cells chime.
+const FILTERS = [
+  { name: "All cues", types: ["visual", "anomaly", "trend", "error"] },
+  { name: "Author only", types: ["visual"] },
+  { name: "Data only", types: ["anomaly", "trend"] },
+  { name: "Errors only", types: ["error"] },
+];
+
+// Trend Scan's tones come from Margaux's sonify.js. It is loaded on its own, so
+// the rest of the app keeps working if that file isn't there yet.
+let sonify = null;
+import("./sonify.js")
+  .then((module) => {
+    sonify = module;
+    applyScale();
+  })
+  .catch(() => console.info("[trend scan] sonify.js is not available yet"));
 
 // Hovering announces the cell under the mouse, at most this often.
 const HOVER_THROTTLE_MS = 150;
@@ -67,6 +95,8 @@ const state = {
   cellsByRef: new Map(),
   focus: null, // { row, col }
   explanations: new Map(), // ref → text from /api/explain, for this sheet only
+  mode: "explore", // see MODES
+  filter: 0, // index into FILTERS
 };
 
 const gridEl = document.getElementById("grid");
@@ -136,6 +166,7 @@ function showSheet(sheet, note = "") {
   state.sheet = sheet;
   state.cellsByRef = new Map(sheet.cells.map((c) => [c.ref, c]));
   state.explanations.clear();
+  applyScale();
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
@@ -156,7 +187,7 @@ function showSheet(sheet, note = "") {
 function orientation() {
   const overview = state.sheet.overview || `${state.sheet.title}.`;
   const next = state.sheet.attention_order.length
-    ? "Press Space to go to the first flagged cell, use the arrow keys to explore, or press H for help."
+    ? "Press Space to go through the flagged cells, use the arrow keys to explore, or press H for help."
     : "Use the arrow keys to explore, or press H for help.";
   return `${overview} ${next}`;
 }
@@ -367,7 +398,7 @@ function spokenValue(cell) {
 
 // The most important signal type on a cell, or null.
 function topSignal(cell) {
-  const types = (cell?.signals || []).map((s) => s.type);
+  const types = visibleSignals(cell).map((s) => s.type);
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
@@ -387,9 +418,11 @@ function describeCell(row, col) {
     const label = cell?.row_label || rowLabel(row);
     const header = cell?.col_header || colHeader(col);
     parts.push(contextPhrase(label, header, cell));
+    const position = runPosition(row, col);
+    if (position) parts.push(position);
   }
 
-  const signals = cell?.signals || [];
+  const signals = visibleSignals(cell);
   let looks = formattingWords(row, col, cell);
   // The author's cue already says "highlighted in red": don't say it twice.
   if (signals.some((s) => s.type === "visual" && /highlight/i.test(s.detail))) {
@@ -397,13 +430,147 @@ function describeCell(row, col) {
   }
   if (looks.length) parts.push(sentenceCase(looks.join(", ")));
 
-  const cueFacts = signals.map((s) => cueWithFact(s, cell));
-  const mismatch = formatMismatch(row, col);
-  if (mismatch) {
-    cueFacts.push(mismatch.alert);
-    if (mismatch.stored) parts.push(mismatch.stored);
-  }
+  const { cueFacts, stored } = cueSentences(row, col, cell);
+  if (stored) parts.push(stored);
   return [...cueFacts, ...parts].join(". ") + ".";
+}
+
+// Concise mode: the value alone. Cues still speak first.
+function describeConcise(row, col) {
+  const cell = cellAt(row, col);
+  const value =
+    row === state.sheet.header_row && !cell?.error
+      ? spokenHeader(spokenValue(cell))
+      : spokenValue(cell);
+  const { cueFacts, stored } = cueSentences(row, col, cell);
+  return [...cueFacts, value, ...(stored ? [stored] : [])].join(". ") + ".";
+}
+
+// The cue sentences for a cell under the current filter, plus the stored
+// number when a format alert needs it.
+function cueSentences(row, col, cell) {
+  const cueFacts = visibleSignals(cell).map((s) => cueWithFact(s, cell));
+  const mismatch = visibleMismatch(row, col);
+  if (mismatch) cueFacts.push(mismatch.alert);
+  return { cueFacts, stored: mismatch?.stored || null };
+}
+
+// "Month 8 of 12": where a cell sits in the sheet's main series.
+function runPosition(row, col) {
+  const series = state.sheet.series_cols || [];
+  const i = series.indexOf(col);
+  if (i === -1 || row === state.sheet.header_row) return null;
+  return `${sentenceCase(runWord())} ${i + 1} of ${series.length}`;
+}
+
+function runWord() {
+  const headers = (state.sheet.series_cols || []).map((c) => (colHeader(c) || "").trim());
+  if (!headers.length) return "column";
+  if (headers.every((h) => MONTH_PATTERN.test(h))) return "month";
+  if (headers.every((h) => /^q[1-4]\b/i.test(h))) return "quarter";
+  if (headers.every((h) => /^(19|20)\d{2}$/.test(h))) return "year";
+  return "column";
+}
+
+// ---------- Filters ----------
+
+function visibleSignals(cell) {
+  const types = FILTERS[state.filter].types;
+  return (cell?.signals || []).filter((s) => types.includes(s.type));
+}
+
+// Format alerts are about how the author laid the sheet out, so they belong
+// with the author's cues.
+function visibleMismatch(row, col) {
+  return FILTERS[state.filter].types.includes("visual") ? formatMismatch(row, col) : null;
+}
+
+// attention_order, keeping only cells with a cue the current filter lets through.
+function flaggedOrder() {
+  return state.sheet.attention_order.filter(
+    (ref) => visibleSignals(state.cellsByRef.get(ref)).length
+  );
+}
+
+function cycleFilter() {
+  state.filter = (state.filter + 1) % FILTERS.length;
+  showModeLine();
+  const count = flaggedOrder().length;
+  const signals = count === 0 ? "No signals" : count === 1 ? "1 signal" : `${count} signals`;
+  voice.announce(`${FILTERS[state.filter].name}. ${signals}.`);
+}
+
+// ---------- Modes ----------
+
+function setMode(mode) {
+  if (mode === "scan" && !sonify?.isSupported?.()) {
+    // The contract: without Trend Scan, fall back to Concise.
+    state.mode = "concise";
+    showModeLine();
+    voice.announce("Trend Scan isn't available yet, so I'll use Concise mode. Values only; cues still speak.");
+    return;
+  }
+  state.mode = mode;
+  showModeLine();
+  voice.announce(MODES[mode].says);
+}
+
+// Visible for sighted viewers following along.
+function showModeLine() {
+  document.getElementById("mode-line").textContent =
+    `Mode: ${MODES[state.mode].name} · Filter: ${FILTERS[state.filter].name}`;
+}
+
+// ---------- Trend Scan ----------
+
+// Once per sheet: every number in the main series fixes the pitch scale, so rows
+// can be compared by ear.
+function applyScale() {
+  if (!sonify || !state.sheet) return;
+  const values = [];
+  for (let row = state.sheet.header_row + 1; row <= state.sheet.n_rows; row++) {
+    for (const col of state.sheet.series_cols || []) {
+      const value = cellAt(row, col)?.value;
+      if (typeof value === "number") values.push(value);
+    }
+  }
+  sonify.setScale(values);
+}
+
+// R / C in Trend Scan: the current row or column as tones. Where there is no
+// series to play (a header row, a column outside the series), read it instead.
+function playTones(which) {
+  const { row, col } = state.focus;
+  const { header_row, n_rows } = state.sheet;
+  const series = state.sheet.series_cols || [];
+  const number = (cell) => (typeof cell?.value === "number" ? cell.value : null);
+  let values;
+  let label;
+
+  if (which === "row") {
+    if (row === header_row || !series.length) return readRow();
+    values = series.map((c) => number(cellAt(row, c)));
+    label =
+      `${rowLabel(row) || `Row ${row}`}, ` +
+      `${spokenHeader(colHeader(series[0]))} to ${spokenHeader(colHeader(series[series.length - 1]))}`;
+  } else {
+    if (!series.includes(col)) return readColumn();
+    const rows = [];
+    for (let r = header_row + 1; r <= n_rows; r++) rows.push(r);
+    values = rows.map((r) => number(cellAt(r, col)));
+    label = `${spokenHeader(colHeader(col))}, ${rowLabel(rows[0])} to ${rowLabel(rows[rows.length - 1])}`;
+  }
+  voice.stop(); // the tones and their spoken scale line come from sonify.js
+  sonify.playSeries({ values, label, unit: seriesUnit() });
+}
+
+// "€" when the series is shown in a currency, so the scale line says "€62,000".
+function seriesUnit() {
+  for (const col of state.sheet.series_cols || []) {
+    const symbol = cellAt(state.sheet.header_row + 1, col)?.display?.match(/[€$£¥]/)?.[0];
+    if (symbol) return symbol;
+  }
+  return "";
 }
 
 // "Pattern cue: Falls 60% after 6 months of rises". The engine's detail is a
@@ -540,10 +707,23 @@ function spokenFormula(formula) {
 // Flagged cells interrupt politely-queued output.
 function announceFocus(prefix = "") {
   const { row, col } = state.focus;
+  const cell = cellAt(row, col);
   // A format mismatch gets the same "something here" chime as a flagged cell.
-  const type = topSignal(cellAt(row, col)) || (formatMismatch(row, col) ? "visual" : null);
+  const type = topSignal(cell) || (visibleMismatch(row, col) ? "visual" : null);
   const soundMs = cues.play(type || "tick");
-  voice.announce(prefix + describeCell(row, col), {
+
+  // Trend Scan: ordinary numbers are silent; the tick is enough to feel movement.
+  const isDataNumber =
+    typeof cell?.value === "number" &&
+    row !== state.sheet.header_row &&
+    col !== state.sheet.label_col;
+  if (state.mode === "scan" && !type && isDataNumber) {
+    voice.stop();
+    return;
+  }
+
+  const text = state.mode === "explore" ? describeCell(row, col) : describeConcise(row, col);
+  voice.announce(prefix + text, {
     priority: type ? "assertive" : "polite",
     delay: soundMs,
   });
@@ -565,29 +745,23 @@ function move(dRow, dCol) {
 
 // NOTICE: step through attention_order, wrapping around at either end.
 function jumpToFlagged(step) {
-  const order = state.sheet.attention_order;
+  const order = flaggedOrder();
   if (!order.length) {
-    voice.announce("Nothing in this sheet was flagged.");
+    voice.announce(
+      state.filter === 0
+        ? "Nothing in this sheet was flagged."
+        : `Nothing flagged with the filter ${FILTERS[state.filter].name}. Press F to change it.`
+    );
     return;
   }
   const here = columnLetter(state.focus.col) + state.focus.row;
   let i = order.indexOf(here);
   // Not on a flagged cell: N goes to the first, Shift+N to the last.
   if (i === -1) i = step > 0 ? -1 : 0;
-  goToFlagged((i + step + order.length) % order.length);
+  goToFlagged(order, (i + step + order.length) % order.length);
 }
 
-// Space: straight to the first flagged cell.
-function jumpToFirstFlagged() {
-  if (!state.sheet.attention_order.length) {
-    voice.announce("Nothing in this sheet was flagged.");
-    return;
-  }
-  goToFlagged(0);
-}
-
-function goToFlagged(i) {
-  const order = state.sheet.attention_order;
+function goToFlagged(order, i) {
   const cell = state.cellsByRef.get(order[i]);
   if (!cell) return;
   setFocus(cell.row, cell.col);
@@ -747,18 +921,25 @@ const KEY_ACTIONS = {
   ArrowDown: () => move(1, 0),
   ArrowLeft: () => move(0, -1),
   ArrowRight: () => move(0, 1),
-  " ": jumpToFirstFlagged,
+  " ": (event) => jumpToFlagged(event.shiftKey ? -1 : 1),
   n: (event) => jumpToFlagged(event.shiftKey ? -1 : 1),
+  1: () => setMode("explore"),
+  2: () => setMode("concise"),
+  3: () => setMode("scan"),
+  f: cycleFilter,
   o: speakOverview,
   w: explainFocus,
   "?": explainFocus,
   d: describeFocus,
   l: () => startLoadingDemo(),
   u: () => chooseFile(),
-  r: readRow,
-  c: readColumn,
+  r: () => (state.mode === "scan" ? playTones("row") : readRow()),
+  c: () => (state.mode === "scan" ? playTones("column") : readColumn()),
   h: () => voice.announce(HELP_TEXT),
-  Escape: () => voice.stop(),
+  Escape: () => {
+    voice.stop();
+    sonify?.stop?.();
+  },
 };
 
 gridEl.addEventListener("keydown", (event) => {
@@ -901,6 +1082,8 @@ function sayProblem(message) {
 // Test switches until the visible controls exist (Phase 3):
 // ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate,
 // ?voice=Ava picks a voice by name (the console lists them).
+showModeLine();
+
 const params = new URLSearchParams(location.search);
 if (params.has("sr")) voice.setMode("sr");
 if (params.has("rate")) voice.setRate(Number(params.get("rate")));

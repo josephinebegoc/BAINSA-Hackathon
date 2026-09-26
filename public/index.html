@@ -30,6 +30,7 @@
       <label class="button" for="file-input">Upload spreadsheet (U)</label>
     </div>
     <p id="status">Press L for the demo sheet, or U to upload your own spreadsheet.</p>
+    <p id="mode-line" aria-hidden="true"></p>
   </header>
 
   <main>
@@ -49,13 +50,14 @@
       <ul>
         <li><kbd>Arrow keys</kbd> move one cell</li>
         <li><kbd>O</kbd> overview of the sheet</li>
-        <li><kbd>Space</kbd> first flagged cell</li>
-        <li><kbd>N</kbd> / <kbd>Shift+N</kbd> next / previous flagged cell</li>
+        <li><kbd>Space</kbd> or <kbd>N</kbd> next flagged cell (add <kbd>Shift</kbd> for previous)</li>
         <li><kbd>W</kbd> or <kbd>?</kbd> why was this cell flagged?</li>
         <li><kbd>L</kbd> load the demo sheet</li>
         <li><kbd>U</kbd> upload your own spreadsheet</li>
         <li><kbd>D</kbd> describe everything about this cell</li>
-        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column</li>
+        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column (as tones in Trend Scan)</li>
+        <li><kbd>1</kbd> Explore · <kbd>2</kbd> Concise · <kbd>3</kbd> Trend Scan</li>
+        <li><kbd>F</kbd> change which cues you hear (all, author, data, errors)</li>
         <li><kbd>Esc</kbd> stop speaking</li>
         <li><kbd>H</kbd> hear these shortcuts</li>
       </ul>
