@@ -39,9 +39,19 @@ class Cell(BaseModel):
     row_label: str | None = None  # "Italy"
     col_header: str | None = None # "Jun"
 
+    # The author's visual vocabulary. All of it is captured, whether or not our
+    # rules flag the cell, because the user is entitled to ask about any of it.
     fill: str | None = None       # "FFFF0000", "unknown-non-default", or None
     font_color: str | None = None # "FFFF0000" when the author recoloured the text
     bold: bool = False
+    italic: bool = False
+    underline: bool = False
+    strike: bool = False
+    bordered: bool = False        # any deliberate border on any side
+    conditional: bool = False     # covered by a conditional formatting rule
+    comment: str | None = None    # a sighted user sees the little marker
+
+    number_format: str | None = None   # "General", "0.0%", '"€"#,##0'
     formula: str | None = None    # "=(M3-L3)/L3"
     error: str | None = None      # "#DIV/0!"
 
