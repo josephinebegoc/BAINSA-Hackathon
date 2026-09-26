@@ -45,6 +45,36 @@ body {
 }
 
 h1 { margin: 0; font-size: 1.5rem; line-height: 1.2; letter-spacing: -.01em; }
+
+/* Atkinson Hyperlegible, designed by the Braille Institute for low-vision
+   readers. Served from our own site (public/fonts, with its OFL licence), so it
+   works offline and nothing is requested from a third party. */
+@font-face {
+  font-family: "Atkinson Hyperlegible";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/atkinson-hyperlegible-bold.woff2") format("woff2");
+}
+
+/* The logo is the word itself. The yellow square is a "cell" used as the full
+   stop; it is drawn in CSS, so screen readers only read "Glance". */
+.wordmark {
+  font-family: "Atkinson Hyperlegible", "Avenir Next", Avenir, "Trebuchet MS", system-ui, sans-serif;
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -.03em;
+}
+.wordmark::after {
+  content: "";
+  display: inline-block;
+  width: .26em;
+  height: .26em;
+  margin-left: .06em;
+  border-radius: .05em;
+  background: #ffd400;
+}
 .tagline { margin: .15rem 0 0; color: #dbe3f0; } /* 11:1 on navy */
 
 .controls { display: flex; gap: .75rem; flex-wrap: wrap; }

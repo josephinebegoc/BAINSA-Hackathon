@@ -37,12 +37,14 @@ const ERROR_WORDS = {
   "#NULL!": "Empty intersection",
 };
 
+const SITE_NAME = "Glance";
+
 // Said (or shown) as the page opens, before any key has been pressed.
 const OPENING =
   "Press any key to start, L to load the demo, or U to upload your own spreadsheet.";
 // Said once the first key, click or tap has turned sound on.
 const WELCOME =
-  "Welcome. Press L to open the demo sheet, or U to upload your own spreadsheet. " +
+  `Welcome to ${SITE_NAME}. Press L to open the demo sheet, or U to upload your own spreadsheet. ` +
   "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
 const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "s", "1", "2", "3", "Escape"]);
@@ -1048,7 +1050,7 @@ startBtn.addEventListener("click", () => {
   if (startBtn.hidden) return; // a key press and its click can both arrive
   cues.unlock();
   startBtn.hidden = true;
-  document.title = "Accessible Attention for Excel";
+  document.title = SITE_NAME;
   gridEl.focus();
   // Speaking inside the click is what unlocks speech on iPhones and iPads.
   // With ?fixture=1 a sheet is already showing, so give its overview instead.
@@ -1081,7 +1083,7 @@ document.addEventListener(
 function startLoadingDemo() {
   cues.unlock(); // this click is what lets the browser play sound later
   startBtn.hidden = true; // sound is unlocked now, so Start has done its job
-  document.title = "Accessible Attention for Excel";
+  document.title = SITE_NAME;
   voice.announce("Opening the demo workbook.");
   loadDemo();
 }
@@ -1129,7 +1131,7 @@ const fileInput = document.getElementById("file-input");
 function chooseFile() {
   cues.unlock();
   startBtn.hidden = true;
-  document.title = "Accessible Attention for Excel";
+  document.title = SITE_NAME;
   voice.announce("Choose an Excel file.");
   fileInput.value = ""; // so choosing the same file again still counts
   fileInput.click();
