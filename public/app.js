@@ -552,8 +552,7 @@ async function fetchExplanation(cell, row, col) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         cell,
-        row_label: cell.row_label || rowLabel(row),
-        col_header: cell.col_header || colHeader(col),
+        ...context(cell, row, col),
         row_values: rowValues(row),
         signals: cell.signals,
       }),
@@ -570,6 +569,18 @@ async function fetchExplanation(cell, row, col) {
   }
 }
 
+// The row label and column header around a cell. A header cell has no row
+// label (the cell at the start of the header row is a heading, e.g. "Country"),
+// and a label cell has no column header.
+function context(cell, row, col) {
+  const inHeaderRow = row === state.sheet.header_row;
+  const inLabelCol = col === state.sheet.label_col;
+  return {
+    row_label: inHeaderRow ? null : cell.row_label || rowLabel(row) || null,
+    col_header: inLabelCol ? null : cell.col_header || colHeader(col) || null,
+  };
+}
+
 // The row's values, left to right, without its label: context for /api/explain.
 function rowValues(row) {
   const values = [];
@@ -581,9 +592,8 @@ function rowValues(row) {
 
 // Offline fallback: the engine's own facts, joined.
 function localExplanation(cell, row, col) {
-  const where = [cell.row_label || rowLabel(row), spokenHeader(cell.col_header || colHeader(col))]
-    .filter(Boolean)
-    .join(", ");
+  const { row_label, col_header } = context(cell, row, col);
+  const where = [row_label, spokenHeader(col_header)].filter(Boolean).join(", ");
   const reasons = cell.signals.map((s) => s.detail).join(". ");
   return `${where}. ${reasons}.`;
 }
