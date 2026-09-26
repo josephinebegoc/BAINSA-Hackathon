@@ -6,6 +6,47 @@ An accessibility layer for spreadsheets. It helps blind and low-vision users **o
 
 Core message: **"Screen readers make spreadsheet cells readable. We make visual attention accessible."**
 
+### The gap we fill
+
+Existing accessibility guidance (Microsoft's included) is addressed to **authors**:
+use real headers, add alt text, keep contrast high, never encode meaning in colour
+alone, put an overview in A1. All of it assumes the author did the work.
+
+We answer the opposite question:
+
+> **What happens when the spreadsheet wasn't designed accessibly in the first place?**
+
+Someone sends you a workbook where red fill means urgent, bold means important, a
+sudden drop is visually obvious and one strange value catches the eye. None of that
+is in the text of any cell. A screen reader will read you the numbers and none of
+the meaning.
+
+So the product is not data analysis. It is **recovering information that sighted
+users perceive through a different channel**, and delivering it *continuously, during
+exploration* — without asking the author to redesign anything.
+
+That phrase, **continuous accessible attention while navigating**, is the
+differentiator. Anything that only works as a one-off report is off-message.
+
+### The four cues
+
+The four signal types are four *kinds of information being recovered*, not four
+statistics. Keep this vocabulary in the pitch and the UI:
+
+| Cue | Signal `type` | Sounds like |
+|---|---|---|
+| **Author visual cue** | `visual` | "The author highlighted this red." |
+| **Statistical cue** | `anomaly` | "This value is unusually low." |
+| **Pattern cue** | `trend` | "This breaks an upward trend." |
+| **Functional cue** | `error` | "This cell contains an error." |
+
+The first row is the one nobody else does, and it is the reason the product exists.
+Give author visual semantics at least as much care as the statistics.
+
+**Do not rename the `type` values.** `visual`/`anomaly`/`trend`/`error` are the wire
+format in `models.py` and the fixture; the human names above belong in the interface
+and the pitch. Changing the wire values buys nothing and breaks the frontend.
+
 Four actions define the product. Every feature must map to one of them:
 
 1. **ORIENT**: "What am I looking at?" An instant spoken overview when a file opens.
@@ -18,6 +59,28 @@ The AI is one component, not the product. The **attention engine** (our own dete
 ## MVP (the only thing to build)
 
 Upload .xlsx → overview → explore the grid → attention cue → press "Why?"
+
+### Feature backlog — candidates, not commitments
+
+Ideas worth having on the table, with what each would actually cost us. **Nothing
+here starts before the Phase 2 milestone (the whole loop running on the production
+URL).** Then pick off the cheap, on-message ones in this order.
+
+| Feature | What it does | Value | Real cost for us |
+|---|---|---|---|
+| **Next Important** | Jump between salient cells with one key | ★★★★★ | **Already in the MVP.** `attention_order` is built; `N`/`Shift+N` is Josephine's step 2. |
+| **Attention Map** | Ranks areas needing attention | ★★★★★ | **Engine side already done** — that is exactly what `attention_order` is. Only a visual/spoken summary is missing. |
+| **Visual Semantics Translator** | Turns formatting into meaning and cues | ★★★★★ | **Partly done** (fill, font colour, bold). Deepening it is the highest-value work left: italic, underline, strikethrough, borders, cell comments, conditional formatting. |
+| **Author Intent vs AI Insight** | Separates "the author marked this" from "we detected this" | ★★★★★ | **Nearly free.** `Signal.type` already encodes it: `visual` is the author, `anomaly`/`trend` are us, `error` is the file. Costs one grouping in the announcement, and it states the core message out loud. Do this one. |
+| **Attention Filters** | User chooses which cues they want to notice | ★★★★ | Cheap. Signals are already typed; needs a toggle in the UI and a filter on `attention_order`. |
+| **Context Radius** | Explains what surrounds the selected cell | ★★★★ | Cheap. Everything needed is already in the `SheetModel` the browser holds. |
+| **Audio Heatmap** | Different sounds convey sheet characteristics | ★★★★ | Medium, and entirely Josephine's side — a natural extension of `cues.js`. |
+| **Change Radar** | Compares two versions of a workbook | ★★★★★ | **Expensive.** Needs two uploads, a diffing pass, and a different API shape. Do not start it before the freeze. |
+| **Accessible Mini-Map** | Spatial overview of the workbook's regions | ★★★★★ | **Expensive.** Needs region detection (finding blocks of related cells), which is real new engine work. |
+
+Recommendation if time is short: **Author Intent vs AI Insight**, then **deepen the
+Visual Semantics Translator**, then **Attention Filters**. All three are cheap, all
+three are on-message, and the first two are the differentiator.
 
 ### Out of scope (do not build)
 
@@ -117,7 +180,13 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
 - Load the workbook **twice**: `data_only=False` to get formulas, `data_only=True` to get cached values and errors.
 - **Gotcha:** openpyxl never calculates formulas. A file written by openpyxl has no cached values, so `#DIV/0!` will not appear. The demo file must be recalculated and saved by a spreadsheet app (see Demo data below).
 - Header detection (keep it simple): the first non-empty row where most cells are strings is the header row. The first column with mostly strings below it holds the row labels. Use the sheet title, or cell A1 if it is a lone title, as `title`.
-- Capture per cell: value, formatted display (respect the number format where easy, otherwise format numbers sensibly), fill colour (`cell.fill.fgColor.rgb` when `fill_type == "solid"`), bold, formula, error string (`#DIV/0!`, `#N/A`, `#VALUE!`, `#REF!`, `#NAME?`).
+- Capture per cell: value, formatted display (respect the number format where easy, otherwise format numbers sensibly), fill colour (`cell.fill.fgColor.rgb` when `fill_type == "solid"`), font colour, bold, formula, error string (`#DIV/0!`, `#N/A`, `#VALUE!`, `#REF!`, `#NAME?`).
+- **Capture the author's full visual vocabulary even before we announce all of it.**
+  Italic, underline, strikethrough, borders, cell comments/notes, and conditional
+  formatting are all ways an author encodes meaning that a screen reader loses. They
+  are cheap to read once the workbook is open and expensive to add later, because
+  adding a field means changing the contract and re-coordinating both branches.
+  Extract them now; decide what to speak later.
 - Treat theme and indexed colours defensively: if the colour can't be resolved, record `"fill": "unknown-non-default"` rather than crash.
 
 ## Attention engine (attention.py)

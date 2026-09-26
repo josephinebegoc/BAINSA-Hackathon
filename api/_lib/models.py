@@ -40,6 +40,7 @@ class Cell(BaseModel):
     col_header: str | None = None # "Jun"
 
     fill: str | None = None       # "FFFF0000", "unknown-non-default", or None
+    font_color: str | None = None # "FFFF0000" when the author recoloured the text
     bold: bool = False
     formula: str | None = None    # "=(M3-L3)/L3"
     error: str | None = None      # "#DIV/0!"
