@@ -28,6 +28,13 @@ const VOICE_PREFERENCES = [
   /^Google (UK|US) English/i, // Chrome's online voices
 ];
 
+// We use a male voice. Browsers don't say which voices are male, so we go by
+// the names of the common ones: Chrome's "Google UK English Male", Edge's
+// Guy/Andrew/Brian/… (Natural), Apple's Daniel/Aaron/Arthur/…
+// ("Female" doesn't match "male" because of the word boundary.)
+const MALE_VOICE =
+  /\b(male|guy|andrew|brian|christopher|eric|roger|steffan|ryan|thomas|william|liam|davis|tony|jason|david|mark|george|james|daniel|alex|aaron|arthur|evan|nathan|tom|oliver|rishi|gordon|lee|reed|fred)\b/i;
+
 const settings = {
   mode: synth ? "self" : "sr", // no speech support: fall back to the screen reader
   rate: loadRate(),
@@ -110,13 +117,18 @@ function pickVoice() {
   );
 }
 
-// The first voice matching the earliest preference; otherwise the system default.
+// The best-sounding male voice; if the device has none, the best voice of any kind.
 function bestVoice(voices) {
+  const male = voices.filter((v) => MALE_VOICE.test(v.name));
+  if (!male.length) console.info("[voice] no male voice on this device, using the best available");
+  const pool = male.length ? male : voices;
+
   for (const pattern of VOICE_PREFERENCES) {
-    const match = voices.find((v) => pattern.test(v.name));
+    const match = pool.find((v) => pattern.test(v.name));
     if (match) return match;
   }
-  return voices.find((v) => v.default) || voices[0];
+  // No high-quality voice: take the default if it qualifies, and avoid robotic "Fred".
+  return pool.find((v) => v.default) || pool.find((v) => !/fred/i.test(v.name)) || pool[0];
 }
 
 // ---------- Self-voicing ----------

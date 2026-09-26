@@ -36,7 +36,7 @@ const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
   "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
-  "W explains why a cell was flagged. " +
+  "W explains why a cell was flagged. D describes everything about a cell. " +
   "R reads the whole row, C the whole column. Escape stops speaking.";
 
 // Hovering announces the cell under the mouse, at most this often.
@@ -72,7 +72,9 @@ function showSheet(sheet) {
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
-  statusEl.textContent = `${sheet.title} loaded. ${sheet.attention_order.length} cells flagged.`;
+  statusEl.textContent =
+    `${sheet.title} loaded. ${sheet.attention_order.length} cells flagged. ` +
+    `Voice: ${voice.getVoiceName()}.`;
 
   renderGrid();
   // Start on the first data cell, just below the header and right of the labels.
@@ -215,6 +217,74 @@ function setFocus(row, col) {
 
 // ---------- What we say (EXPLORE) ----------
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTH_PATTERN =
+  /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:[\s\-'/]+(\d{2,4}))?$/i;
+
+// If a header names a moment in time, say it in full: "Nov" → "November",
+// "Jan 2026" → "January 2026", "q3" → "Q3". Otherwise return null.
+function timePhrase(text) {
+  const t = (text || "").trim();
+  const month = t.match(MONTH_PATTERN);
+  if (month) {
+    const name = MONTHS.find((m) => m.toLowerCase().startsWith(month[1].slice(0, 3).toLowerCase()));
+    return month[2] ? `${name} ${month[2]}` : name;
+  }
+  if (/^(q[1-4]|h[12])(\s+\d{4})?$/i.test(t)) return t.toUpperCase();
+  if (/^(19|20)\d{2}$/.test(t)) return t;
+  return null;
+}
+
+// Headers as spoken: month names in full, everything else as written.
+function spokenHeader(text) {
+  return timePhrase(text) || text;
+}
+
+// "France" → "France's", "Netherlands" → "Netherlands'"
+function possessive(name) {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+// "revenue is", "sales are"
+function verbFor(noun) {
+  return /[^s]s$/i.test(noun.trim()) ? "are" : "is";
+}
+
+// Row and column context as one phrase, using only words the sheet contains:
+//   "France in November: €82,400"            (column is a time)
+//   "France's revenue in November is €82,400" (if the backend names the values)
+//   "Belgium's Growth % is 5.3%"              (column is not a time)
+//   "Revenue in January is €80,000"           (rows are times: column-oriented)
+function contextPhrase(label, header, cell) {
+  const value = spokenValue(cell);
+  const labelTime = timePhrase(label);
+  const headerTime = timePhrase(header);
+  // What the numbers are, e.g. "revenue". Not in the contract yet: ask Margaux.
+  const measure = state.sheet.value_label;
+
+  let subject = label || header || "";
+  let noun = null; // the word "is"/"are" agrees with; none means use a colon
+  if (label && headerTime && !labelTime) {
+    subject = measure ? `${possessive(label)} ${measure} in ${headerTime}` : `${label} in ${headerTime}`;
+    noun = measure || null;
+  } else if (header && labelTime && !headerTime) {
+    subject = `${header} in ${labelTime}`;
+    noun = header;
+  } else if (label && header) {
+    subject = `${possessive(label)} ${spokenHeader(header)}`;
+    noun = header;
+  }
+
+  if (!subject) return value;
+  if (cell?.error) {
+    return `${subject} has an error: ${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+  }
+  return noun ? `${subject} ${verbFor(noun)} ${value}` : `${subject}: ${value}`;
+}
+
 function rowLabel(row) {
   return cellAt(row, state.sheet.label_col)?.display || "";
 }
@@ -235,28 +305,103 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "F3. Italy. May. €31,000. Statistical cue."
-// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy. …"
+// "F3. Italy in May: €31,000. Statistical cue."
+// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy in May: …"
 function describeCell(row, col, { cueFirst = false } = {}) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
 
   if (row === state.sheet.header_row) {
-    parts.push("Column header", spokenValue(cell));
+    parts.push("Column header", cell?.error ? spokenValue(cell) : spokenHeader(spokenValue(cell)));
   } else if (col === state.sheet.label_col) {
     parts.push("Row label", spokenValue(cell));
   } else {
     const label = cell?.row_label || rowLabel(row);
     const header = cell?.col_header || colHeader(col);
-    if (label) parts.push(label);
-    if (header) parts.push(header);
-    parts.push(spokenValue(cell));
+    parts.push(contextPhrase(label, header, cell));
   }
+
+  const looks = formattingWords(row, col, cell);
+  if (looks.length) parts.push(sentenceCase(looks.join(", ")));
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
   const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
   const ordered = cueFirst ? [...cueNames, ...parts] : [...parts, ...cueNames];
   return ordered.join(". ") + ".";
+}
+
+// ---------- What it looks like (the author's visual vocabulary) ----------
+
+// Nearest plain colour word for an ARGB hex. Never read hex codes aloud.
+function colourName(argb) {
+  const hex = (argb || "").slice(-6);
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const light = (max + min) / 2;
+  const spread = max - min;
+  if (spread < 0.12) return light < 0.2 ? "black" : light > 0.85 ? "white" : "grey";
+
+  let hue;
+  if (max === r) hue = (((g - b) / spread + 6) % 6) * 60;
+  else if (max === g) hue = ((b - r) / spread + 2) * 60;
+  else hue = ((r - g) / spread + 4) * 60;
+  if (hue < 15 || hue >= 345) return "red";
+  if (hue < 45) return "orange";
+  if (hue < 70) return "yellow";
+  if (hue < 165) return "green";
+  if (hue < 255) return "blue";
+  if (hue < 290) return "purple";
+  return "pink";
+}
+
+// What a sighted person would notice about a cell, in short words.
+// everything=false (navigation): only what stands out at a glance. Bold headers
+// and labels, borders and conditional formatting are too common to repeat on
+// every cell. everything=true (the D key): all of it.
+function formattingWords(row, col, cell, { everything = false } = {}) {
+  if (!cell) return [];
+  const words = [];
+  const structural = row === state.sheet.header_row || col === state.sheet.label_col;
+
+  if (cell.fill) {
+    const colour = cell.fill === "unknown-non-default" ? null : colourName(cell.fill);
+    words.push(colour ? `highlighted ${colour}` : "highlighted");
+  }
+  // Excel often stores ordinary black text as a theme colour, which reaches us
+  // as "unknown-non-default"; only a colour we can actually name is announced.
+  const text = colourName(cell.font_color);
+  if (text && text !== "black") words.push(`${text} text`);
+  if (cell.bold && (everything || !structural)) words.push("bold");
+  if (cell.italic) words.push("italic");
+  if (cell.underline) words.push("underlined");
+  if (cell.strike) words.push("crossed out");
+  if (everything) {
+    if (cell.bordered) words.push("has a border");
+    if (cell.conditional) words.push("has conditional formatting");
+  } else if (cell.comment) {
+    words.push("has a note");
+  }
+  return words;
+}
+
+function sentenceCase(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// "=(M8-L8)/L8" → "M8 minus L8 divided by L8"
+function spokenFormula(formula) {
+  return formula
+    .replace(/^=/, "")
+    .replace(/:/g, " to ")
+    .replace(/\//g, " divided by ")
+    .replace(/\*/g, " times ")
+    .replace(/\+/g, " plus ")
+    .replace(/(?<=[\w)])\s*-/g, " minus ")
+    .replace(/[(),]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // The cue's sound plays first; speech waits until it has finished.
@@ -326,7 +471,7 @@ function explainFocus() {
   const { row, col } = state.focus;
   const cell = cellAt(row, col);
   if (!cell?.signals.length) {
-    voice.announce("No cues on this cell.");
+    voice.announce("No cues on this cell. Press D to describe it.");
     return;
   }
   const where = [cell.row_label || rowLabel(row), cell.col_header || colHeader(col)]
@@ -334,6 +479,31 @@ function explainFocus() {
     .join(", ");
   const reasons = cell.signals.map((s) => s.detail).join(". ");
   voice.announce(`${where}. ${reasons}.`);
+}
+
+// D: everything a sighted person could see about this cell, flagged or not.
+// "Anything visible is theirs to have."
+function describeFocus() {
+  const { row, col } = state.focus;
+  const cell = cellAt(row, col);
+  const out = [`${columnLetter(col)}${row}`];
+
+  if (!cell || (cell.display === "" && !cell.error)) out.push("Empty");
+  else if (cell.error) out.push(`Shows an error: ${spokenValue(cell).toLowerCase()}`);
+  else out.push(`Shows ${cell.display}`);
+
+  if (cell?.formula) out.push(`Calculated by the formula ${spokenFormula(cell.formula)}`);
+
+  const looks = formattingWords(row, col, cell, { everything: true });
+  out.push(looks.length ? `Formatting: ${looks.join(", ")}` : "No special formatting");
+
+  if (cell?.comment) out.push(`Note: ${cell.comment}`);
+
+  const types = [...new Set((cell?.signals || []).map((s) => s.type))];
+  if (types.length) {
+    out.push(`Cues: ${types.map((t) => SIGNAL_NAMES[t].toLowerCase()).join(", ")}. Press W for why`);
+  }
+  voice.announce(out.join(". ") + ".");
 }
 
 // R: "Italy. Jan, €80,000. Feb, €81,200. …"
@@ -345,7 +515,7 @@ function readRow() {
     const cell = cellAt(row, col);
     if (col === label_col) continue;
     const header = row === header_row ? "" : colHeader(col);
-    parts.push(header ? `${header}, ${spokenValue(cell)}` : spokenValue(cell));
+    parts.push(header ? `${spokenHeader(header)}, ${spokenValue(cell)}` : spokenValue(cell));
   }
   const label = rowLabel(row) || `Row ${row}`;
   const empty = parts.every((p) => p.endsWith("blank"));
@@ -361,9 +531,9 @@ function readColumn() {
     const cell = cellAt(row, col);
     if (row === header_row) continue;
     const label = col === label_col ? "" : rowLabel(row);
-    parts.push(label ? `${label}, ${spokenValue(cell)}` : spokenValue(cell));
+    parts.push(label ? `${spokenHeader(label)}, ${spokenValue(cell)}` : spokenValue(cell));
   }
-  const header = colHeader(col) || `Column ${columnLetter(col)}`;
+  const header = spokenHeader(colHeader(col)) || `Column ${columnLetter(col)}`;
   const empty = parts.every((p) => p.endsWith("blank"));
   voice.announce(empty ? `${header}. Empty column.` : `${header}. ${parts.join(". ")}.`);
 }
@@ -380,6 +550,7 @@ const KEY_ACTIONS = {
   o: speakOverview,
   w: explainFocus,
   "?": explainFocus,
+  d: describeFocus,
   r: readRow,
   c: readColumn,
   h: () => voice.announce(HELP_TEXT),
