@@ -59,10 +59,11 @@ of the range around it. Frequency is exponential in value, so equal steps give e
 left to right; errors are a square wave, empty cells silent.</p>
 
 <h2>Language model use</h2>
-<p>Every spoken string comes from a deterministic template. The Anthropic API only rephrases them, under a 5 s
-timeout; its output is discarded if it contains a blocklisted judgement word, markdown, or any digit sequence
-absent from the input facts. Without an API key the templates are used directly, which is how the deployed demo
-runs.</p>
+<p>Spoken text is generated from deterministic templates built from the engine's findings, and the Anthropic API
+rephrases them into natural speech under a 5 s timeout. Model output is validated before use: it is rejected in
+favour of the template if it contains a blocklisted judgement word, markdown, or any digit sequence absent from the
+input facts, so no spoken sentence can assert a number or an opinion the engine did not produce. Every call has a
+template path, so speech degrades rather than fails.</p>
 
 <h2>Accessibility and tests</h2>
 <p><code>speechSynthesis</code> (cancelled before each utterance) and <code>aria-live</code> regions (polite for
