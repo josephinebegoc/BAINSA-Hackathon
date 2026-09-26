@@ -120,7 +120,7 @@ def test_explain_row_context_stays_like_for_like(client):
     """The row holds a growth ratio as well as revenue. Saying the row runs from
     -0 to 154,000 would be worse than saying nothing."""
     body = client.post("/api/explain", json=_cell_and_row(client, "I2")).json()
-    assert "run from 69,000 to 154,000" in body["text"]
+    assert "run from \u20ac69,000 to \u20ac154,000" in body["text"]
 
 
 def test_explain_never_editorialises(client):
