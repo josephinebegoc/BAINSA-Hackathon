@@ -103,7 +103,7 @@ URL).** Then pick off the cheap, on-message ones in this order.
 | **Describe this cell** | On demand, everything a sighted person would see about the current cell — fill, font colour, bold, italic, borders, comment, number format — flagged or not | ★★★★★ | Cheap once extraction captures it, and it is the purest expression of "convey, don't conclude". Strong candidate. |
 | **Attention Filters** | User chooses which cues they want to notice | ★★★★ | Cheap. Signals are already typed; needs a toggle in the UI and a filter on `attention_order`. Real agency: the user decides what counts. |
 | **Context Radius** | Explains what surrounds the selected cell | ★★★★ | Cheap. Everything needed is already in the `SheetModel` the browser holds. |
-| **Audio Heatmap** | Different sounds convey sheet characteristics | ★★★★ | Medium, and entirely Josephine's side — a natural extension of `cues.js`. |
+| **Audio Heatmap** | Different sounds convey sheet characteristics | ★★★★ | Medium, and entirely Josephine's side. Note it pulls against the one-sound decision above — if we ever build it, it is a separate mode the user turns on, not the default navigation sound. |
 | **Change Radar** | Compares two versions of a workbook | ★★★★★ | **Expensive.** Needs two uploads, a diffing pass, and a different API shape. Do not start it before the freeze. |
 | **Accessible Mini-Map** | Spatial overview of the workbook's regions | ★★★★★ | **Expensive.** Needs region detection (finding blocks of related cells), which is real new engine work. |
 
@@ -283,7 +283,14 @@ Put the grid container at `role="application"` with an `aria-label` and a clear 
 
 ### Cues (cues.js): NOTICE
 - Normal cell: a very short, quiet tick (Web Audio, about 30 ms).
-- Flagged cell: a distinct "buzz" earcon played **before** the speech, with a different timbre or pitch per type (visual, anomaly, trend, error). Keep all four easy to tell apart.
+- Flagged cell: **one single attention earcon, the same for all four cue types**, played **before** the speech. Do not give each type its own timbre or pitch.
+- The sound says *"something here"*, nothing more. Which kind of cue it is comes from
+  the spoken label straight after it, so **the announcement must always name the
+  type** — the sound no longer carries that information and there is nowhere else
+  for it to come from.
+- Why one sound: four earcons mean four things to learn before the tool is usable,
+  and telling timbres apart is a harder task than hearing a word. One sound is
+  learned instantly and never ambiguous.
 - If `navigator.vibrate` exists: flagged cell → `[60, 40, 60]`, error → `[200]`.
 - The announcement for a flagged cell appends a short label only: "Italy. May revenue. €31,000. Unusual value." The full reason comes only when the user presses `W`.
 
@@ -327,7 +334,7 @@ flagging `D5` visual, `F3` anomaly, `G4` trend, `N8` error — and nothing else 
 1. Grid rendering from the fixture (`?fixture=1` loads `public/fixtures/sample_sheet.json`), focus outline, signal markers by type.
 2. Keyboard navigation: arrows announce cell + row label + column header + value; `N`/`Shift+N`, `O`, `W`, `R`/`C`, `Esc`, `H` for help. Calls `voice.announce(text, {priority})` and `cues.play(type)` — stub them until step 3.
 3. `voice.js` — self-voicing + aria-live modes, cancel-on-move, speaking rate.
-4. `cues.js` — four distinct earcons + vibration, earcon *before* speech.
+4. `cues.js` — one attention earcon (the same for every cue type) + vibration, earcon *before* speech.
 5. The **Start button** that unlocks audio and speaks the overview. Browsers block speech until a real user gesture, so without this the demo is silent.
 
 Done when: the fixture is fully explorable by keyboard, with all four signals

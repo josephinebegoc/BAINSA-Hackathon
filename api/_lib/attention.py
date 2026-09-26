@@ -118,44 +118,56 @@ def comparable_axes(cells: list[Cell], axis: str = "col") -> list[set[int]]:
     """Which columns (or rows) hold quantities of the same kind.
 
     A "Growth vs Jan" column of 0.8 must never be compared against revenue figures
-    of 130,000, or every growth figure reads as an extreme anomaly. Formatting is
-    the obvious way to tell them apart, but real files are often formatted General
-    with no % sign at all, so we go by scale instead: group by unit first, then keep
-    together only the lines whose medians sit within SCALE_SPREAD of each other.
+    of 130,000, or every growth figure reads as an extreme anomaly.
 
-    Scale is judged per line, across the whole sheet, rather than per cell -- one
-    outlier barely moves its own column's median, so it stays in its group and can
-    still be detected. Bucketing individual values would hide it in a group of one.
+    We judge by **scale, not formatting**. Formatting is the obvious signal and the
+    wrong one: real files are formatted inconsistently, and the demo file alone has
+    one revenue column accidentally set to percent and four more left as General.
+    Splitting a series on that would analyse eight months instead of twelve. Scale
+    survives it, because a mis-formatted revenue figure is still revenue-sized.
+
+    The cost is that two genuinely different quantities at the same magnitude -- euros
+    and dollars, say -- would be compared. That is rarer, and less damaging, than
+    tearing one series into three.
+
+    Scale is judged per line across the whole sheet, not per cell: one outlier barely
+    moves its own column's median, so it stays in its group and can still be detected.
+    Bucketing individual values would hide every spike in a group of one.
     """
     index = (lambda c: c.col) if axis == "col" else (lambda c: c.row)
 
     values: dict[int, list[float]] = defaultdict(list)
-    units: dict[int, list[str]] = defaultdict(list)
     for cell in cells:
         if _numeric(cell) and cell.error is None:
             values[index(cell)].append(abs(float(cell.value)))
-            units[index(cell)].append(unit_of(cell.display))
 
-    by_unit: dict[str, list[int]] = defaultdict(list)
-    medians: dict[int, float] = {}
+    scales: dict[int, float] = {}
+    zeros: list[int] = []
     for idx, vals in values.items():
-        medians[idx] = statistics.median(vals)
-        by_unit[Counter(units[idx]).most_common(1)[0][0]].append(idx)
+        median = statistics.median(vals)
+        if median > 0:
+            scales[idx] = math.log10(median)
+        else:
+            zeros.append(idx)
 
-    groups: list[set[int]] = []
-    for lines in by_unit.values():
-        scales = [medians[i] for i in lines if medians[i] > 0]
-        if not scales:
-            groups.append(set(lines))
-            continue
-        middle = statistics.median(scales)
-        near = {i for i in lines if medians[i] <= 0
-                or abs(math.log10(medians[i] / middle)) <= math.log10(SCALE_SPREAD)}
-        far = set(lines) - near
-        groups.append(near)
-        if far:
-            groups.append(far)
-    return [g for g in groups if len(g) >= MIN_SERIES]
+    if not scales:
+        return [set(zeros)] if len(zeros) >= MIN_SERIES else []
+
+    # Walk the lines in order of scale and cut wherever the gap is a big jump.
+    gap = math.log10(SCALE_SPREAD)
+    ordered = sorted(scales, key=lambda i: scales[i])
+    groups: list[list[int]] = [[ordered[0]]]
+    for previous, current in zip(ordered, ordered[1:]):
+        if scales[current] - scales[previous] > gap:
+            groups.append([current])
+        else:
+            groups[-1].append(current)
+
+    # Columns that are all zeros belong with whatever group is biggest.
+    if zeros:
+        max(groups, key=len).extend(zeros)
+
+    return [set(g) for g in groups if len(g) >= MIN_SERIES]
 
 
 def series_groups(line: list[Cell], keep: set[int] | None = None,
