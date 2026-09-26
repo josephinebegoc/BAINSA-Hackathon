@@ -21,6 +21,7 @@ from typing import Any
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter
 
+from .charts import read_charts
 from .models import Cell, SheetModel
 
 MAX_ROWS = 400          # keep the payload and the function well inside Vercel's limits
@@ -288,6 +289,12 @@ def extract(source, sheet_index: int = 0) -> tuple[SheetModel, str | None]:
         value_label=value_label,
         overview="", cells=cells, attention_order=[],
     )
+
+    # Charts are extra. One we cannot read leaves the sheet exactly as it was.
+    try:
+        model.charts = read_charts(formulas, values, name, cells, _format)
+    except Exception:
+        model.charts = []
     return model, _step_word(col_headers)
 
 

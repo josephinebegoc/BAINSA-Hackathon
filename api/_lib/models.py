@@ -58,6 +58,35 @@ class Cell(BaseModel):
     signals: list[Signal] = Field(default_factory=list)
 
 
+class ChartPoint(BaseModel):
+    """One point on a chart line: what the chart plots, and where it comes from."""
+
+    category: str                 # "Jan": the x-axis label, as the sheet writes it
+    value: float | None = None    # None for a gap: a blank, text or error in the source
+    display: str = ""             # "€154,000", in the number format the series shows
+    ref: str | None = None        # "H2": the source cell on this sheet, when there is one
+
+
+class ChartSeries(BaseModel):
+    """One line on a chart."""
+
+    name: str | None = None       # "Italy"
+    source: str | None = None     # "'European Sales 2026'!$B$2:$M$2", as the chart cites it
+    points: list[ChartPoint] = Field(default_factory=list)
+
+
+class Chart(BaseModel):
+    """A chart embedded in the worksheet. The demo cut reads one line chart."""
+
+    id: str                       # "chart1"
+    kind: str                     # "line"
+    title: str | None = None      # None when the author gave it none
+    x_title: str | None = None    # axis titles, when the author wrote them
+    y_title: str | None = None
+    anchor: str | None = None     # "B12:J27": the cells the chart sits over
+    series: list[ChartSeries] = Field(default_factory=list)
+
+
 class SheetModel(BaseModel):
     """A whole worksheet, ready for the browser to render and narrate."""
 
@@ -81,6 +110,10 @@ class SheetModel(BaseModel):
 
     cells: list[Cell]
     attention_order: list[str]    # refs, severity first then reading order
+
+    # Charts embedded in the sheet. Empty for a sheet without one, which then
+    # behaves exactly as it did before charts were read at all.
+    charts: list[Chart] = Field(default_factory=list)
 
 
 # --- API request/response bodies -------------------------------------------
