@@ -32,7 +32,7 @@ from _lib.explain import explain as explain_cell  # noqa: E402
 from _lib.explain import template as explain_template  # noqa: E402
 from _lib.extract import extract  # noqa: E402
 from _lib.models import ExplainRequest, HealthResponse, OverviewFacts, TextResponse  # noqa: E402
-from _lib.overview import overview_for, polish_overview  # noqa: E402
+from _lib.overview import facts_for, overview_for, polish_overview  # noqa: E402
 
 # Vercel rejects request bodies over about 4.5 MB before our code ever runs, so
 # say something useful a little before that rather than letting it fail opaquely.
@@ -138,10 +138,20 @@ async def upload(file: UploadFile = File(...)):
     except Exception:
         model.series_cols = []
 
+    # The overview is spoken the moment a workbook opens, so it is worth phrasing
+    # well. Claude rephrases the template; any failure keeps the template, and the
+    # template itself is the last resort.
     try:
         model.overview = overview_for(model)
     except Exception:
         model.overview = f"{model.title}. {model.n_rows} rows by {model.n_cols} columns."
+
+    try:
+        polished = polish_overview(facts_for(model), timeout=4.0)
+        if polished.source == "llm" and polished.text.strip():
+            model.overview = polished.text
+    except Exception:
+        pass
 
     return model
 

@@ -131,7 +131,14 @@ def polish_overview(facts: OverviewFacts, timeout: float = 5.0) -> TextResponse:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return fallback
 
-    payload = facts.model_dump_json()
+    # Hand the model our spoken cue names. Given the raw types it reaches for them
+    # and says "3 visual signals" instead of "3 author visual cues".
+    readable = facts.model_dump()
+    readable["signal_counts"] = {
+        CUE_NAMES.get(kind, kind) + ("" if n == 1 else "s"): n
+        for kind, n in facts.signal_counts.items()
+    }
+    payload = json.dumps(readable, ensure_ascii=False, default=str)
     try:
         import anthropic
 
