@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sonify.js test</title>
+  <style>
+    body { font: 16px/1.6 system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    button { font: inherit; padding: .6rem 1rem; margin: .25rem .25rem .25rem 0; }
+    #log { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>sonify.js on its own</h1>
+  <p>Temporary page for checking Trend Scan without the rest of the app.
+     Click a button; you should hear tones.</p>
+
+  <button id="rise">Steady climb (should rise evenly)</button>
+  <button id="italy">Italy: climbs then falls off a cliff</button>
+  <button id="small">A smaller country (should sound lower overall)</button>
+  <button id="stop">Stop</button>
+
+  <div id="log">loading…</div>
+
+<script type="module">
+const log = document.getElementById("log");
+const say = (m) => { log.textContent += "\n" + m; };
+
+let s;
+try {
+  s = await import("./sonify.js");
+  log.textContent = "sonify.js loaded.";
+  say("isSupported(): " + s.isSupported());
+} catch (err) {
+  log.textContent = "FAILED to load sonify.js: " + err.message;
+  throw err;
+}
+
+// One scale for the whole sheet, exactly as app.js does it.
+const sheet = [];
+for (let row = 0; row < 8; row++)
+  for (let m = 0; m < 12; m++) sheet.push(70000 + row * 12000 + m * 6000);
+sheet.push(390000);
+s.setScale(sheet);
+say("setScale() with " + sheet.length + " values -> hasScale(): " + s.hasScale());
+
+const play = (values, label) => {
+  const ms = s.playSeries({ values, label, unit: "€" });
+  say(`\n${label}\n  ${s.describe({ values, label, unit: "€" })}\n  playSeries returned ${ms} ms`);
+  if (ms === 0) say("  ^ returned 0: nothing was scheduled.");
+};
+
+document.getElementById("rise").onclick = () =>
+  play([70000, 85000, 100000, 115000, 130000, 145000, 160000, 175000], "Steady climb");
+
+document.getElementById("italy").onclick = () =>
+  play([100000, 110000, 121000, 132000, 141000, 147000, 154000, 62000, 69000, 76000, 82000, 89000],
+       "Italy, January to December");
+
+document.getElementById("small").onclick = () =>
+  play([70000, 72000, 74000, 71000, 75000, 73000, 76000, 74000], "A smaller country");
+
+document.getElementById("stop").onclick = () => { s.stop(); say("stopped"); };
+</script>
+</body>
+</html>

@@ -136,6 +136,18 @@ export function playSeries({ values, label, unit } = {}, { onDone } = {}) {
   unlock();
   if (!ctx || !values || !values.length) return 0;
 
+  // A context can still be "suspended" when it is created inside a key handler, and
+  // resume() settles asynchronously. Notes scheduled before it settles are never
+  // heard, which looks exactly like nothing happening.
+  if (ctx.state === "suspended") {
+    ctx.resume().then(() => schedule(values, onDone));
+  } else {
+    schedule(values, onDone);
+  }
+  return Math.round(values.length * NOTE_MS + 60);
+}
+
+function schedule(values, onDone) {
   const start = ctx.currentTime + 0.05;
   const last = values.length - 1;
 
@@ -154,9 +166,9 @@ export function playSeries({ values, label, unit } = {}, { onDone } = {}) {
     // An empty cell is silence, which reads correctly as a gap.
   });
 
-  const total = Math.round(values.length * NOTE_MS + 60);
-  if (onDone) scheduled.push(setTimeout(onDone, total));
-  return total;
+  if (onDone) {
+    scheduled.push(setTimeout(onDone, Math.round(values.length * NOTE_MS + 60)));
+  }
 }
 
 export function stop() {
