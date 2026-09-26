@@ -16,6 +16,7 @@ import os
 import re
 import statistics
 
+from .attention import unit_of
 from .models import ExplainRequest, TextResponse
 
 # Words that turn a fact into an opinion. If the model reaches for one of these,
@@ -45,6 +46,23 @@ about causes.
 
 
 SCALE_SPREAD = 100      # the same like-with-like rule the attention engine uses
+
+# Spoken aloud, "Mar" and "Aug" come out as noises rather than months in several
+# voices. The grid still shows whatever the sheet wrote; only the speech expands.
+MONTH_NAMES = {
+    "jan": "January", "feb": "February", "mar": "March", "apr": "April",
+    "may": "May", "jun": "June", "jul": "July", "aug": "August",
+    "sep": "September", "sept": "September", "oct": "October",
+    "nov": "November", "dec": "December",
+}
+
+
+def spoken_header(header: str | None) -> str:
+    """A column header as it should be heard, not as it is written."""
+    if not header:
+        return ""
+    key = header.strip().rstrip(".").lower()
+    return MONTH_NAMES.get(key, header)
 
 
 def _comparable(values: list, anchor) -> list[float]:
@@ -79,15 +97,23 @@ def _sentence(parts: list[str]) -> str:
 def template(request: ExplainRequest) -> str:
     """The explanation we always have."""
     cell = request.cell
-    where = ", ".join(p for p in (request.row_label or cell.row_label,
-                                  request.col_header or cell.col_header) if p)
+    label = request.row_label or cell.row_label
+    header = spoken_header(request.col_header or cell.col_header)
 
     signals = request.signals or cell.signals
     details = [s.detail for s in signals]
     if not details:
-        return _sentence([where, "No cues on this cell"])
+        return _sentence([", ".join(p for p in (label, header) if p),
+                          "No cues on this cell"])
 
-    # "Falls 60% after 6 months of rises. The author also highlighted it in red."
+    # "Germany, Mar. 148% above Germany's median" says Germany twice. When the
+    # cue already names the row, the prefix does not need to.
+    joined_details = " ".join(details)
+    if label and label in joined_details:
+        where = header
+    else:
+        where = ", ".join(p for p in (label, header) if p)
+
     joined = details[0]
     for extra in details[1:]:
         joined += ". " + extra
@@ -97,8 +123,12 @@ def template(request: ExplainRequest) -> str:
     numbers = [n for n in _comparable(request.row_values, cell.value)
                if n != cell.value]
     if len(numbers) >= 3:
-        parts.append(f"Other values in this row run from {min(numbers):,.0f} "
-                     f"to {max(numbers):,.0f}")
+        # Speak the numbers the way the sheet shows them. "91,000" loses the euro
+        # sign the listener can see on every other cell in the row.
+        unit = unit_of(cell.display) if cell.display else ""
+        symbol = unit if len(unit) == 1 and not unit.isalnum() else ""
+        parts.append(f"Other values in this row run from {symbol}{min(numbers):,.0f} "
+                     f"to {symbol}{max(numbers):,.0f}")
     return _sentence(parts)
 
 

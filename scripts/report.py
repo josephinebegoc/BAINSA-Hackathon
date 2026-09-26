@@ -57,9 +57,11 @@ def main(path: str) -> None:
     for ref in model.attention_order:
         cell = by_ref[ref]
         cues = ", ".join(CUE_NAMES.get(s.type, s.type) for s in cell.signals)
-        spoken = ". ".join(p for p in (cell.row_label, cell.col_header,
+        # Cue label first: the listener needs to know something is here before
+        # the content arrives, not after they have moved on.
+        spoken = ". ".join(p for p in (cues, cell.row_label, cell.col_header,
                                        model.value_label.capitalize() or None,
-                                       cell.display, cues) if p)
+                                       cell.display) if p)
         row_values = [c.value for c in model.cells
                       if c.row == cell.row and c.col != model.label_col]
         why = explain_template(ExplainRequest(cell=cell, row_values=row_values,
