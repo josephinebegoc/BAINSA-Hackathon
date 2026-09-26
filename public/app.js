@@ -304,9 +304,10 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "F3. Italy in May: €31,000. Statistical cue."
-// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy in May: …"
-function describeCell(row, col, { cueFirst = false } = {}) {
+// "Author visual cue. D5. Spain's sales in March are €63,400. Highlighted red."
+// The cue name comes first, so the listener knows what kind of cell this is
+// before hearing its value.
+function describeCell(row, col) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
 
@@ -325,8 +326,7 @@ function describeCell(row, col, { cueFirst = false } = {}) {
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
   const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
-  const ordered = cueFirst ? [...cueNames, ...parts] : [...parts, ...cueNames];
-  return ordered.join(". ") + ".";
+  return [...cueNames, ...parts].join(". ") + ".";
 }
 
 // ---------- What it looks like (the author's visual vocabulary) ----------
@@ -405,11 +405,11 @@ function spokenFormula(formula) {
 
 // The cue's sound plays first; speech waits until it has finished.
 // Flagged cells interrupt politely-queued output.
-function announceFocus(prefix = "", { cueFirst = false } = {}) {
+function announceFocus(prefix = "") {
   const { row, col } = state.focus;
   const type = topSignal(cellAt(row, col));
   const soundMs = cues.play(type || "tick");
-  voice.announce(prefix + describeCell(row, col, { cueFirst }), {
+  voice.announce(prefix + describeCell(row, col), {
     priority: type ? "assertive" : "polite",
     delay: soundMs,
   });
@@ -595,8 +595,7 @@ function announceHover() {
   const col = Number(hoverTd.dataset.col);
   if (row === state.focus.row && col === state.focus.col) return;
   setFocus(row, col);
-  // Someone sweeping the mouse hears the cue type first, so they know to stop.
-  announceFocus("", { cueFirst: true });
+  announceFocus();
 }
 
 // Start: the click that lets the browser play sound and speech. It opens the
