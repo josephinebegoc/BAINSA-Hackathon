@@ -42,7 +42,8 @@ const HELP_TEXT =
   "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
-  "R reads the whole row, C the whole column. Escape stops speaking.";
+  "R reads the whole row, C the whole column. L loads the demo sheet again. " +
+  "Escape stops speaking.";
 
 // Hovering announces the cell under the mouse, at most this often.
 const HOVER_THROTTLE_MS = 150;
@@ -668,6 +669,7 @@ const KEY_ACTIONS = {
   w: explainFocus,
   "?": explainFocus,
   d: describeFocus,
+  l: () => startLoadingDemo(),
   r: readRow,
   c: readColumn,
   h: () => voice.announce(HELP_TEXT),
@@ -719,8 +721,10 @@ function announceHover() {
 // Start: the click that lets the browser play sound and speech. It opens the
 // demo sheet (unless one is already showing) and speaks its overview.
 startBtn.addEventListener("click", () => {
+  if (startBtn.hidden) return; // a key press and its click can both arrive
   cues.unlock();
   startBtn.hidden = true;
+  document.title = "Accessible Attention for Excel";
   if (state.sheet) {
     gridEl.focus();
     voice.announce(orientation());
@@ -731,11 +735,34 @@ startBtn.addEventListener("click", () => {
   loadDemo();
 });
 
-document.getElementById("load-demo").addEventListener("click", () => {
+// Before starting, any key starts: a blind user can't find a button they can't
+// see, and pressing a key is the natural first thing to do. Keys held with
+// Ctrl, Option or Cmd are left alone, so screen-reader commands (VoiceOver uses
+// Ctrl+Option) can explore the page first. Escape doesn't count as a user
+// gesture in browsers, so it can't unlock sound anyway.
+const NOT_A_START = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Escape", "Tab"]);
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (startBtn.hidden || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (NOT_A_START.has(event.key)) return;
+    event.preventDefault(); // this key only starts; it doesn't also act on the grid
+    event.stopPropagation();
+    startBtn.click();
+  },
+  { capture: true }
+);
+
+// L, or the Load demo button: open the demo sheet again.
+function startLoadingDemo() {
   cues.unlock(); // this click is what lets the browser play sound later
   startBtn.hidden = true; // sound is unlocked now, so Start has done its job
+  document.title = "Accessible Attention for Excel";
+  voice.announce("Opening the demo workbook.");
   loadDemo();
-});
+}
+
+document.getElementById("load-demo").addEventListener("click", startLoadingDemo);
 
 // Test switches until the visible controls exist (Phase 3):
 // ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate,

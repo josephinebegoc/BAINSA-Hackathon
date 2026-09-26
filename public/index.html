@@ -3,24 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Accessible Attention for Excel</title>
+  <!-- Screen readers read the title as the page opens, so it says how to begin. -->
+  <title>Press any key to start – Accessible Attention for Excel</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
+  <!-- Browsers block sound until the first click, tap or key press, so
+       everything audible starts here. It covers the whole screen so it can be
+       found without seeing it: tap anywhere, click anywhere, or press any key. -->
+  <button type="button" id="start" autofocus
+          aria-label="Start. Press any key or tap anywhere to turn on sound and hear an overview of the demo sheet.">
+    <span class="start-word">Start</span>
+    <span class="start-hint">Press any key or tap anywhere</span>
+  </button>
+
   <header>
     <h1>Accessible Attention for Excel</h1>
     <p class="tagline">Screen readers make spreadsheet cells readable. We make visual attention accessible.</p>
     <div class="controls">
-      <!-- Browsers block sound until the first click or key press, so
-           everything audible starts from this button. -->
-      <button type="button" id="start" class="primary" autofocus
-              aria-label="Start. Turns on sound and reads an overview of the sample sheet.">
-        Start
-      </button>
-      <button type="button" id="load-demo">Load demo</button>
+      <button type="button" id="load-demo" aria-keyshortcuts="L">Load demo (L)</button>
     </div>
-    <p id="status">Press Start to turn on sound and hear an overview of the sample sales sheet.</p>
+    <p id="status">Press any key to turn on sound and hear an overview of the demo sheet.</p>
   </header>
 
   <main>
@@ -43,6 +47,7 @@
         <li><kbd>Space</kbd> first flagged cell</li>
         <li><kbd>N</kbd> / <kbd>Shift+N</kbd> next / previous flagged cell</li>
         <li><kbd>W</kbd> or <kbd>?</kbd> why was this cell flagged?</li>
+        <li><kbd>L</kbd> load the demo sheet again</li>
         <li><kbd>D</kbd> describe everything about this cell</li>
         <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column</li>
         <li><kbd>Esc</kbd> stop speaking</li>
