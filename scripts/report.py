@@ -101,6 +101,10 @@ def main(path: str) -> None:
             usual, _ = formats.most_common(1)[0]
             odd = sorted({c.col for c in body
                           if c.col in group and c.number_format not in (usual, None)})
+            odd = [c for c in odd
+                   if model.col_headers and by_ref.get(
+                       f"{chr(64 + c) if c <= 26 else '?'}{model.header_row}") is not None
+                   and not by_ref[f"{chr(64 + c) if c <= 26 else '?'}{model.header_row}"].signals]
             if odd:
                 said_something = True
                 print(f"\n  Columns formatted unlike the rest of their series "

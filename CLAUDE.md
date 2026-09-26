@@ -232,7 +232,7 @@ Pure functions with no I/O, fully unit-tested. Four signal types:
 
 | Type | Rule (prototype) | Example detail |
 |---|---|---|
-| `visual` | non-default solid fill, or red/orange font; bold only if the rest of the row isn't bold | "Author highlighted this cell in red" |
+| `visual` | non-default solid fill, or red/orange font; bold only if the rest of the row isn't bold; **or a column formatted unlike the rest of its series** | "Author highlighted this cell in red"; "This column is formatted as a percentage while the others show currency" |
 | `anomaly` | Within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median; distance from the median alone only when the spread is too degenerate for a z-score. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
 | `trend` | at least 3 consecutive increases (or decreases) followed by a move in the opposite direction larger than 25% | "Breaks a 4-month upward trend" |
 | `error` | cell holds an Excel error value | "Formula error: division by zero" |
@@ -240,6 +240,7 @@ Pure functions with no I/O, fully unit-tested. Four signal types:
 - Severity: `error` is always high; `visual` is high; `anomaly`/`trend` are medium, or high if both hit the same cell.
 - `attention_order`: sort by severity, then reading order (row, col).
 - Name colours in plain words (red, orange, yellow, green, blue, grey) by nearest hue. Never read hex codes aloud.
+- **Odd column formatting is an author visual cue.** A revenue column left formatted as a percentage renders as "6,900,000.0%" beside "€112,000": obvious to a sighted reader, silent to a screen reader. The cue goes on the column's **header cell**, once — the oddity belongs to the column, and flagging every cell in it would bury everything else. Neighbouring columns with the same oddity collapse into one cue ("Oct to Dec are formatted as a plain number"). A percentage among currency is `high` because it changes the number you read; a missing currency symbol is `medium`.
 - **The 15% floor on the z-score is not optional.** A series with tight noise has a
   tiny MAD, which makes the robust z-score explode on trivial variation: without the
   floor the demo sheet flags an ordinary cell sitting 13% above its row median.
