@@ -29,7 +29,19 @@ let LOCAL_SPAN = 0.34;
 // in your head, and leaves a real gap between notes so each pitch is separable.
 let NOTE_MS = 400;
 let NOTE_GAP_MS = 70; // silence between notes, so they don't run together
-let GAIN = 0.5; // sine tones are quiet for their amplitude; this is not timid
+let GAIN = 0.5; // the level of the lowest note; higher notes are scaled down to match
+
+// Equal-loudness compensation. Human hearing is far less sensitive at low
+// frequencies (the Fletcher-Munson curves), so a 110 Hz tone at the same amplitude
+// as an 880 Hz one sounds markedly quieter. Left uncorrected, a low note reads as a
+// faint note -- which confuses pitch with volume and makes a row that merely sits
+// low sound weak. Only the pitch is supposed to carry meaning.
+//
+// Amplitude falls as (lowest / frequency) ** TILT, so the bottom note is loudest in
+// amplitude and every note lands at roughly the same perceived loudness. 0.5 is a
+// gentle correction suited to normal listening levels; full A-weighting is derived
+// from very quiet sounds and over-corrects badly here.
+let LOUDNESS_TILT = 0.5;
 const ERROR_HZ = 110; // a rough low buzz, clearly not part of the melody
 
 let ctx = null;
@@ -38,15 +50,22 @@ let scheduled = []; // live nodes, so stop() can cut them off
 
 // Tuning, so the sound can be adjusted by ear on sonify-test.html rather than
 // through a deploy for every guess. The defaults above are what ships.
-export function configure({ noteMs, gapMs, gain, lowHz, highHz, localSpan } = {}) {
+export function configure({ noteMs, gapMs, gain, lowHz, highHz, localSpan, tilt } = {}) {
   if (noteMs) NOTE_MS = noteMs;
   if (gapMs !== undefined) NOTE_GAP_MS = gapMs;
   if (gain) GAIN = gain;
   if (lowHz) LOW_HZ = lowHz;
   if (highHz) HIGH_HZ = highHz;
   if (localSpan !== undefined) LOCAL_SPAN = localSpan;
-  return { noteMs: NOTE_MS, gapMs: NOTE_GAP_MS, gain: GAIN,
-           lowHz: LOW_HZ, highHz: HIGH_HZ, localSpan: LOCAL_SPAN };
+  if (tilt !== undefined) LOUDNESS_TILT = tilt;
+  return { noteMs: NOTE_MS, gapMs: NOTE_GAP_MS, gain: GAIN, lowHz: LOW_HZ,
+           highHz: HIGH_HZ, localSpan: LOCAL_SPAN, tilt: LOUDNESS_TILT };
+}
+
+// The amplitude a note needs to sound as loud as the bottom note does.
+export function gainFor(freq) {
+  if (!freq || freq <= 0) return GAIN;
+  return GAIN * (LOW_HZ / freq) ** LOUDNESS_TILT;
 }
 
 export function isSupported() {
@@ -172,7 +191,10 @@ export function describe({ values, label, unit } = {}) {
 // One note. A triangle wave carries a quiet octave partner, because a pure sine is
 // the hardest timbre there is to follow by pitch -- the overtones give the ear
 // something to hold on to, which is the whole point here.
-function note({ at, freq, ms, pan, wave = "triangle", gain = GAIN }) {
+function note({ at, freq, ms, pan, wave = "triangle", gain = null }) {
+  // Every note is levelled to the same perceived loudness, so pitch is the only
+  // thing that changes as a row is played.
+  const level = gain === null ? gainFor(freq) : gain;
   const seconds = ms / 1000;
 
   let destination = ctx.destination;
@@ -196,7 +218,7 @@ function note({ at, freq, ms, pan, wave = "triangle", gain = GAIN }) {
 
     // Attack, then hold at full volume, then release. The old envelope faded across
     // the whole note, so no note ever actually reached its level.
-    const peak = gain * voice.level;
+    const peak = level * voice.level;
     amp.gain.setValueAtTime(0.0001, at);
     amp.gain.exponentialRampToValueAtTime(peak, at + 0.015);
     amp.gain.setValueAtTime(peak, at + seconds - 0.05);
@@ -244,7 +266,8 @@ function schedule(values, onDone) {
       note({ at, freq: pitches[index], ms: NOTE_MS - NOTE_GAP_MS, pan });
     } else if (typeof value === "string" && value.trim()) {
       // An error cell: a rough low buzz nobody mistakes for a pitch.
-      note({ at, freq: ERROR_HZ, ms: NOTE_MS - NOTE_GAP_MS, pan, wave: "square", gain: 0.3 });
+      note({ at, freq: ERROR_HZ, ms: NOTE_MS - NOTE_GAP_MS, pan, wave: "square",
+             gain: gainFor(ERROR_HZ) * 0.6 });
     }
     // An empty cell is silence, which reads correctly as a gap.
   });
