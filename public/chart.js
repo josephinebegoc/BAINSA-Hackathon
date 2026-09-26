@@ -15,6 +15,14 @@ const INK = "#1a1a1a";
 const LINE = "#1f5fbf";
 const GRID = "#d0d0d0";
 const ACTIVE = "#b8005c";
+// Extra lines on a chart you build: a different colour AND dash for each, so
+// colour is never the only difference.
+const LINE_STYLES = [
+  { stroke: LINE, dash: "" },
+  { stroke: "#1b7f3b", dash: "9 5" },
+  { stroke: "#8a4b00", dash: "2 5" },
+  { stroke: "#5b2a86", dash: "12 4 2 4" },
+];
 
 let view = null; // { svg, marks, points: [{ x, y, data }] }
 
@@ -46,11 +54,14 @@ export function clear(container) {
   view = null;
 }
 
-// chart: one entry of sheet.charts. cues: point indexes that are chart cues.
+// chart: one entry of sheet.charts, or a chart built in Chart mode (several lines).
+// cues: the point indexes that are cues, as one Set (first line) or one Set per line.
 export function render(container, chart, cues = new Set()) {
   clear(container);
-  const points = chart.series[0]?.points || [];
-  const numbers = points.filter((p) => p.value !== null).map((p) => p.value);
+  const lines = chart.series.filter((s) => s.points?.length);
+  const cueSets = Array.isArray(cues) ? cues : [cues];
+  const points = lines[0]?.points || [];
+  const numbers = lines.flatMap((l) => l.points).filter((p) => p.value !== null).map((p) => p.value);
   if (!numbers.length) return;
 
   const { lo, hi, step } = scale(numbers);
@@ -88,52 +99,76 @@ export function render(container, chart, cues = new Set()) {
   // Category axis.
   svg.appendChild(el("line", { x1: M.left, x2: W - M.right, y1: M.top + plotH, y2: M.top + plotH,
     stroke: INK }));
+  // Busy charts (a list of hundreds of orders) label every few points only.
+  const every = Math.max(1, Math.ceil(points.length / 12));
   points.forEach((p, i) => {
+    if (i % every && i !== points.length - 1) return;
+    const text = String(p.category);
     svg.appendChild(el("text", { x: xAt(i), y: M.top + plotH + 18, "text-anchor": "middle",
-      "font-size": 12, fill: INK }, p.category));
+      "font-size": 12, fill: INK }, text.length > 10 ? `${text.slice(0, 9)}…` : text));
   });
   if (chart.x_title) {
     svg.appendChild(el("text", { x: M.left + plotW / 2, y: H - 10, "text-anchor": "middle",
       "font-size": 13, fill: INK }, chart.x_title));
   }
 
-  // The line, broken wherever a point has no value.
-  let d = "";
-  let pen = false;
-  points.forEach((p, i) => {
-    if (p.value === null) {
-      pen = false;
-      return;
-    }
-    d += `${pen ? "L" : "M"}${xAt(i)},${yAt(p.value)} `;
-    pen = true;
+  // Each line, broken wherever a point has no value; cue points are squares.
+  const placedBySeries = lines.map((line, n) => {
+    const style = LINE_STYLES[n % LINE_STYLES.length];
+    let d = "";
+    let pen = false;
+    line.points.forEach((p, i) => {
+      if (p.value === null) {
+        pen = false;
+        return;
+      }
+      d += `${pen ? "L" : "M"}${xAt(i)},${yAt(p.value)} `;
+      pen = true;
+    });
+    svg.appendChild(el("path", { d, fill: "none", stroke: style.stroke, "stroke-width": 3,
+      "stroke-linejoin": "round", "stroke-dasharray": style.dash }));
+    const placed = line.points.map((p, i) => ({ x: xAt(i), y: p.value === null ? null : yAt(p.value), data: p }));
+    const marked = cueSets[n] || new Set();
+    const small = line.points.length > 40; // hundreds of points: no circles, cues only
+    placed.forEach(({ x, y }, i) => {
+      if (y === null) return;
+      if (marked.has(i)) {
+        svg.appendChild(el("rect", { x: x - 6, y: y - 6, width: 12, height: 12, fill: "#fff",
+          stroke: style.stroke, "stroke-width": 3 }));
+      } else if (!small) {
+        svg.appendChild(el("circle", { cx: x, cy: y, r: 5, fill: "#fff", stroke: style.stroke,
+          "stroke-width": 2.5 }));
+      }
+    });
+    return placed;
   });
-  svg.appendChild(el("path", { d, fill: "none", stroke: LINE, "stroke-width": 3,
-    "stroke-linejoin": "round" }));
 
-  // The points: circles, and squares for chart cues.
-  const placed = points.map((p, i) => ({ x: xAt(i), y: p.value === null ? null : yAt(p.value), data: p }));
-  placed.forEach(({ x, y }, i) => {
-    if (y === null) return;
-    svg.appendChild(cues.has(i)
-      ? el("rect", { x: x - 6, y: y - 6, width: 12, height: 12, fill: "#fff", stroke: LINE,
-        "stroke-width": 3 })
-      : el("circle", { cx: x, cy: y, r: 5, fill: "#fff", stroke: LINE, "stroke-width": 2.5 }));
-  });
+  // A legend when there is more than one line: a sample of each line's style.
+  if (lines.length > 1) {
+    lines.forEach((line, n) => {
+      const style = LINE_STYLES[n % LINE_STYLES.length];
+      const x = M.left + n * 150;
+      svg.appendChild(el("line", { x1: x, x2: x + 28, y1: M.top - 6, y2: M.top - 6,
+        stroke: style.stroke, "stroke-width": 3, "stroke-dasharray": style.dash }));
+      svg.appendChild(el("text", { x: x + 34, y: M.top - 2, "font-size": 12, fill: INK },
+        line.name || `Line ${n + 1}`));
+    });
+  }
 
   // The highlight layer sits on top and is redrawn on every move.
   const marks = el("g");
   svg.appendChild(marks);
 
   container.appendChild(svg);
-  view = { svg, marks, points: placed, bottom: M.top + plotH };
+  view = { svg, marks, series: placedBySeries, points: placedBySeries[0], bottom: M.top + plotH };
 }
 
-// Highlight one point (the one being spoken), or none (null).
-export function highlight(index) {
+// Highlight one point (the one being spoken) on a line, or none (null).
+export function highlight(index, series = 0) {
   if (!view) return;
   view.marks.replaceChildren();
-  const spot = index === null || index === undefined ? null : view.points[index];
+  const line = view.series?.[series] || view.points;
+  const spot = index === null || index === undefined ? null : line[index];
   view.svg.dataset.active = spot ? String(index) : "";
   if (!spot || spot.y === null) return;
 
@@ -153,4 +188,24 @@ export function highlight(index) {
     stroke: ACTIVE, "stroke-width": 2 }));
   view.marks.appendChild(el("text", { x: left + width / 2, y: top + 17, "text-anchor": "middle",
     "font-size": 14, "font-weight": 700, fill: INK }, text));
+}
+
+// The point nearest the pointer, left to right, for sweeping the chart with a
+// mouse or a finger. Gaps (no value) are skipped. null when nothing is drawn.
+export function pointAt(clientX) {
+  if (!view) return null;
+  const box = view.svg.getBoundingClientRect();
+  if (!box.width) return null;
+  const x = ((clientX - box.left) / box.width) * W;
+  let best = null;
+  let distance = Infinity;
+  (view.series?.[0] || view.points).forEach((point, i) => {
+    if (point.y === null) return;
+    const d = Math.abs(point.x - x);
+    if (d < distance) {
+      distance = d;
+      best = i;
+    }
+  });
+  return best;
 }

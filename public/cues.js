@@ -43,7 +43,7 @@ export function play(type) {
   vibrate(type);
   const tones = type === "tick" ? TICK : MESSAGE_CHIME;
   if (!ctx) return 0; // audio not unlocked yet: stay silent, don't delay speech
-  for (const tone of tones) playTone(tone);
+  whenRunning(() => tones.forEach(playTone));
   // The tick is so short that speech doesn't need to wait for it.
   if (type === "tick") return 0;
   return Math.round(Math.max(...tones.map((t) => t.start + t.dur)) * 1000);
@@ -73,4 +73,47 @@ function playTone({ start, dur, wave, freq, endFreq, gain }) {
 function vibrate(type) {
   if (!navigator.vibrate || type === "tick") return;
   navigator.vibrate(type === "error" ? VIBRATION.error : VIBRATION.flagged);
+}
+
+// One note at a given pitch, for sweeping a chart like Piano mode: higher values
+// play higher notes, and pan (-1 left … 1 right) follows the point's position.
+// Returns how long it lasts in ms. Silent until audio is unlocked.
+export function note(freq, { pan = 0, gain = 0.2, ms = 120 } = {}) {
+  if (!ctx || !freq) return 0;
+  whenRunning(() => playNote(freq, pan, gain, ms));
+  return ms;
+}
+
+function playNote(freq, pan, gain, ms) {
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const amp = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(freq, t0);
+  amp.gain.setValueAtTime(0.0001, t0);
+  amp.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+  amp.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
+  let tail = osc.connect(amp);
+  if (ctx.createStereoPanner) {
+    const panner = ctx.createStereoPanner();
+    panner.pan.setValueAtTime(Math.max(-1, Math.min(1, pan)), t0);
+    tail = tail.connect(panner);
+  }
+  tail.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + ms / 1000 + 0.02);
+}
+
+// Sounds sent while the audio context is still "suspended" (just woken by a key
+// press, or paused by the browser after a quiet spell) are never heard. Resume
+// first and play once it is really running.
+function whenRunning(playNow) {
+  if (ctx.state === "running") playNow();
+  else ctx.resume().then(playNow).catch(() => {});
+}
+
+// How long play(type) lasts, for scheduling something straight after it.
+export function length(type) {
+  const tones = type === "tick" ? TICK : MESSAGE_CHIME;
+  return Math.round(Math.max(...tones.map((t) => t.start + t.dur)) * 1000);
 }

@@ -144,7 +144,8 @@ def template(facts: OverviewFacts) -> str:
                      f"{facts.first_value_header} and {facts.last_value} under "
                      f"{facts.last_value_header}.")
 
-    parts.extend(facts.charts)
+    # Charts are not described here: Chart mode (4, then R or C) and G for the
+    # workbook's own charts give their facts when the listener asks for them.
 
     total = sum(facts.signal_counts.values())
     if not total:
@@ -153,10 +154,11 @@ def template(facts: OverviewFacts) -> str:
         named = [_plural(facts.signal_counts[k], CUE_NAMES[k])
                  for k in CUE_ORDER if facts.signal_counts.get(k)]
         parts.append(f"{_plural(total, 'cell')} flagged: {_listed(named)}.")
-    if facts.chart_cues:
-        parts.append(facts.chart_cues)
-    if total or facts.chart_cues:
+    if total:
         parts.append("Press N to go to the first.")
+    elif facts.chart_cues:
+        # No flagged cells, but the chart has marked points in the N order.
+        parts.append("Press N to go through the chart's marked points.")
 
     return " ".join(parts)
 

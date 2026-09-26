@@ -426,3 +426,13 @@ button.filter[aria-pressed="true"] { color: #fff; background: var(--navy); borde
 @media (prefers-reduced-motion: no-preference) {
   button, label.button { transition: background-color .15s ease; }
 }
+
+/* Chart mode: the chart takes the table's place inside the grid area, which
+   keeps keyboard focus. */
+#grid.chart-view table { display: none; }
+/* touch-action: none lets a finger sweep the chart to hear it, instead of scrolling. */
+#grid .grid-chart, #chart-panel { touch-action: none; cursor: crosshair; }
+#grid .grid-chart { padding: .5rem; }
+
+/* A row or column picked for your own chart (M / Shift+M). */
+#grid td.picked { box-shadow: inset 0 0 0 3px #b8005c; }

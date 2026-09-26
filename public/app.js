@@ -43,13 +43,15 @@ const SITE_NAME = "Glance";
 
 // Said (or shown) as the page opens, before any key has been pressed.
 const OPENING =
-  "Press any key to start, L to load the demo, or U to upload your own spreadsheet.";
+  "Press any key to start, L to load the demo, K for the chart demo, " +
+  "or U to upload your own spreadsheet.";
 // Said once the first key, click or tap has turned sound on.
 const WELCOME =
-  `Welcome to ${SITE_NAME}. Press L to open the demo sheet, or U to upload your own spreadsheet. ` +
+  `Welcome to ${SITE_NAME}. Press L to open the demo sheet, K for the chart demo, ` +
+  "or U to upload your own spreadsheet. " +
   "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
-const KEYS_WITHOUT_SHEET = new Set(["l", "k", "u", "h", "s", "1", "2", "3", "Escape"]);
+const KEYS_WITHOUT_SHEET = new Set(["l", "k", "u", "h", "s", "1", "2", "3", "4", "Escape"]);
 // Vercel rejects bodies over about 4.5 MB before the server sees them, so we
 // check first and say so, rather than failing with no explanation.
 const MAX_UPLOAD_BYTES = 4_000_000;
@@ -59,8 +61,9 @@ const HELP_TEXT =
   "Space or N jumps to the next flagged cell; with Shift, the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
   "R reads the whole row, C the whole column. " +
-  "1 is Explore mode, 2 is Concise mode, 3 is Sound Graph. " +
+  "1 is Explore mode, 2 is Concise mode, 3 is Piano mode, 4 is Chart mode. " +
   "F changes which cues you hear. " +
+  "M adds the current row to your own chart, Shift M the column; then 4 shows it. " +
   "L loads the demo sheet, K the chart demo. U uploads your own spreadsheet. S or Escape stops speaking.";
 
 // Added to the help only when the sheet has a chart.
@@ -74,11 +77,20 @@ const MODES = {
   explore: { name: "Explore", says: "Explore mode. Full context for every cell." },
   concise: { name: "Concise", says: "Concise mode. Values only; cues still speak." },
   scan: {
-    // "Trend Scan" in CLAUDE.md and sonify.js; people see and hear "Sound Graph".
-    name: "Sound Graph",
+    // "Trend Scan" in CLAUDE.md and sonify.js; people see and hear "Piano".
+    name: "Piano",
     says:
-      "Sound Graph. Numbers are silent. R plays the row as tones, C the column. " +
+      "Piano mode. Numbers are silent. R plays the row as notes, C the column. " +
       "Higher values play higher notes.",
+  },
+  chart: {
+    name: "Chart",
+    says:
+      "Chart mode. The chart replaces the table. Build your own with M on rows or " +
+      "Shift M on columns before pressing 4. Move the mouse across it to hear its shape. " +
+      "Up and down change row, left and right " +
+      "move between points, N goes to the next marked point, C charts the column, " +
+      "O repeats this summary, and Escape brings the table back.",
   },
 };
 // F cycles these. A filter scopes both where N and Space go and which cells chime.
@@ -107,6 +119,7 @@ const state = {
   cellsByRef: new Map(),
   focus: null, // { row, col }
   explanations: new Map(), // ref → text from /api/explain, for this sheet only
+  picks: { kind: null, items: [] }, // your own chart: picked rows or columns
   chart: null, // while exploring a chart: { chart, series, point, status }
   mode: "explore", // see MODES
   filter: 0, // index into FILTERS
@@ -188,6 +201,12 @@ function showSheet(sheet, note = "") {
   state.cellsByRef = new Map(sheet.cells.map((c) => [c.ref, c]));
   state.explanations.clear();
   state.chart = null;
+  state.picks = { kind: null, items: [] };
+  if (state.mode === "chart") {
+    state.mode = "explore"; // a new sheet opens on its table
+    gridEl.classList.remove("chart-view");
+    showModeLine();
+  }
   applyScale();
 
   titleEl.textContent = sheet.title;
@@ -216,8 +235,7 @@ function orientation() {
   const next = state.sheet.attention_order.length
     ? "Press Space to go through the flagged cells, use the arrow keys to explore, or press H for help."
     : "Use the arrow keys to explore, or press H for help.";
-  const chart = hasChart() ? " Press G to explore the chart." : "";
-  return `${overview} ${next}${chart}`;
+  return `${overview} ${next}`;
 }
 
 // ---------- Rendering ----------
@@ -335,7 +353,8 @@ function setFocus(row, col) {
   gridEl.querySelector("td.focused")?.classList.remove("focused");
   const td = gridEl.querySelector(`td[data-row="${row}"][data-col="${col}"]`);
   td.classList.add("focused");
-  td.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // In the chart view the table is hidden: scrolling to it would only jump the page.
+  if (!gridEl.classList.contains("chart-view")) td.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   state.focus = { row, col };
   // Moving around the sheet: no chart point is being spoken any more.
@@ -569,15 +588,22 @@ function setFilter(index) {
 // ---------- Modes ----------
 
 function setMode(mode) {
+  if (state.mode === "chart" && mode !== "chart") closeChartView();
   if (mode === "scan" && !sonify?.isSupported?.()) {
     // The contract: without Trend Scan, fall back to Concise.
     state.mode = "concise";
     showModeLine();
-    voice.announce("Sound Graph isn't available yet, so I'll use Concise mode. Values only; cues still speak.");
+    voice.announce("Piano mode isn't available yet, so I'll use Concise mode. Values only; cues still speak.");
     return;
   }
   state.mode = mode;
   showModeLine();
+  if (mode === "chart" && state.sheet) {
+    const which = state.picks.items.length ? "picked"
+      : state.focus.row === state.sheet.header_row ? "column" : "row";
+    openChartView(which, "Chart mode. ");
+    return;
+  }
   voice.announce(MODES[mode].says);
 }
 
@@ -592,6 +618,450 @@ function showModeLine() {
   for (const button of document.querySelectorAll("button.filter")) {
     button.setAttribute("aria-pressed", String(Number(button.dataset.filter) === state.filter));
   }
+}
+
+// ---------- Chart mode: draw a row or column and describe it ----------
+// R / C in Chart mode build a line chart from the grid itself, draw it with
+// chart.js and speak what a sighted reader would take from it. Its marked points
+// are the cells the attention engine already flagged, so the chart and the grid
+// always agree. Facts only: start and end, highest and lowest, and the marks.
+
+// The chart view: the chart is drawn inside the grid area in place of the table,
+// so keyboard focus (and the screen reader's application mode) never moves.
+function openChartView(which, prefix = "") {
+  const built = which === "picked" ? pickedChart()
+    : which === "row" ? rowChart(chartRow()) : columnChart(chartCol());
+  if (!built) {
+    voice.announce(`${prefix}There aren't enough numbers in this ${which === "picked" ? "chart" : which} to draw it.`);
+    return;
+  }
+  const { chart, markedBySeries } = built;
+  chartPanelEl.hidden = true; // the workbook's own chart panel steps aside
+  gridEl.classList.add("chart-view");
+  chartView.render(chartHost(), chart, markedBySeries);
+  const points = chart.series[0].points;
+  const here = columnLetter(state.focus.col) + state.focus.row;
+  openChart(chart, 0, Math.max(points.findIndex((p) => p.ref === here), 0));
+  Object.assign(state.chart, { which, markedBySeries });
+  lastHoverPoint = null;
+  state.chart.speakingSummary = true;
+  voice.announce(prefix + chartFacts(chart, markedBySeries));
+}
+
+// Back to the table. The grid focus is where the chart last was.
+function closeChartView() {
+  gridEl.classList.remove("chart-view");
+  gridEl.querySelector(".grid-chart")?.remove();
+  if (state.chart) {
+    statusEl.textContent = state.chart.status;
+    state.chart = null;
+  }
+  renderChartPanel(); // the workbook's own chart, if it has one, comes back
+}
+
+function chartHost() {
+  let host = gridEl.querySelector(".grid-chart");
+  if (!host) {
+    host = document.createElement("div");
+    host.className = "grid-chart";
+    host.addEventListener("pointermove", onChartPointer);
+    host.addEventListener("pointerdown", onChartPointer);
+    gridEl.appendChild(host);
+  }
+  return host;
+}
+
+// ---------- Hearing the chart's shape ----------
+// Like Piano mode: each point plays a note, higher values higher, and the note
+// moves from left to right across the chart. Sweeping the chart with the mouse or
+// a finger lets a listener hear where it is high and where it is low.
+
+chartPanelEl.addEventListener("pointermove", onChartPointer);
+chartPanelEl.addEventListener("pointerdown", onChartPointer);
+
+const CHART_NOTE_MS = 120;
+const CHART_PAUSE_MS = 400; // rest this long on a point and it is spoken
+let lastHoverPoint = null;
+let chartPauseTimer = null;
+
+// Both charts can be swept: the one that replaces the table in Chart mode, and
+// the workbook's own chart shown under the table (sweeping it starts exploring it,
+// so the arrow keys and W work on it too).
+function onChartPointer(event) {
+  let chart;
+  if (event.currentTarget === chartPanelEl) {
+    if (inChartView() || !hasChart()) return;
+    chart = state.sheet.charts[0];
+  } else {
+    if (!inChartView()) return;
+    chart = state.chart.chart;
+  }
+  const i = chartView.pointAt(event.clientX);
+  if (i === null || (i === lastHoverPoint && state.chart?.chart === chart)) return;
+  lastHoverPoint = i;
+  if (state.chart?.chart !== chart) openChart(chart, 0, i);
+  state.chart.point = i;
+  focusPoint();
+  // While the chart's summary is being read, the notes play underneath it rather
+  // than cutting it off; once it has finished, sweeping speaks points as usual.
+  if (!summaryPlaying()) voice.stop();
+  playPointNote(i);
+  clearTimeout(chartPauseTimer);
+  chartPauseTimer = setTimeout(() => {
+    if (summaryPlaying()) return;
+    if (state.chart?.chart === chart && state.chart.point === i) announcePoint("", false);
+  }, CHART_PAUSE_MS);
+}
+
+function summaryPlaying() {
+  return Boolean(state.chart?.speakingSummary) && voice.isSpeaking();
+}
+
+// The note for one point: on the sheet-wide Piano scale when sonify.js has one,
+// so a value sounds the same in both modes; else on this chart's own range.
+function playPointNote(i) {
+  const points = state.chart.chart.series[state.chart.series || 0].points;
+  const value = points[i]?.value;
+  if (value === null || value === undefined) return 0; // a gap stays silent
+  let freq;
+  let gain = 0.2;
+  if (sonify?.hasScale?.()) {
+    freq = sonify.frequencyFor(value);
+    gain = sonify.gainFor?.(freq) ?? gain;
+  } else {
+    const values = points.map((p) => p.value).filter((v) => v !== null);
+    const lo = Math.min(...values);
+    const hi = Math.max(...values);
+    freq = 220 * 4 ** (hi > lo ? (value - lo) / (hi - lo) : 0.5); // two octaves
+  }
+  const pan = points.length > 1 ? -0.8 + (1.6 * i) / (points.length - 1) : 0;
+  return cues.note(freq, { pan, gain, ms: CHART_NOTE_MS });
+}
+
+// The row to chart: the focused one, or the first data row from a header.
+function chartRow() {
+  return state.focus.row === state.sheet.header_row ? state.sheet.header_row + 1 : state.focus.row;
+}
+
+// The column to chart: the focused one, or the first of the main series.
+function chartCol() {
+  const cols = chartColumns();
+  return cols.includes(state.focus.col) ? state.focus.col : cols[0];
+}
+
+// Up / Down in the chart view: the previous or next row (or column) as a chart.
+function stepChart(step) {
+  if (state.chart.chart.picked) return stepLine(step);
+  if (state.chart.which === "row") {
+    const row = chartRow() + step;
+    if (row <= state.sheet.header_row || row > state.sheet.n_rows) {
+      voice.announce(step < 0 ? "First row." : "Last row.");
+      return;
+    }
+    setFocus(row, state.focus.col);
+    openChartView("row");
+  } else {
+    const cols = chartColumns();
+    const next = cols[cols.indexOf(chartCol()) + step];
+    if (next === undefined) {
+      voice.announce(step < 0 ? "First column." : "Last column.");
+      return;
+    }
+    setFocus(state.focus.row, next);
+    openChartView("column");
+  }
+}
+
+// Up / Down on a chart you built: the previous or next line.
+function stepLine(step) {
+  const lines = state.chart.chart.series;
+  const s = state.chart.series + step;
+  if (s < 0 || s >= lines.length) {
+    voice.announce(step < 0 ? "First line." : "Last line.");
+    return;
+  }
+  state.chart.series = s;
+  state.chart.point = Math.min(state.chart.point, lines[s].points.length - 1);
+  focusPoint();
+  const facts = lineFacts(lines[s], state.chart.markedBySeries[s], true);
+  state.chart.speakingSummary = true;
+  voice.announce(`Line ${s + 1} of ${lines.length}. ${facts.join(". ")}.`);
+}
+
+// ---------- Building your own chart (M / Shift+M) ----------
+
+// M adds the current row to your chart (Shift+M the column); again removes it.
+function togglePick(kind) {
+  const index = kind === "row" ? state.focus.row : state.focus.col;
+  const line = kind === "row" ? rowLine(index) : columnLine(index);
+  if (!line || line.points.filter((p) => p.value !== null).length < 2) {
+    voice.announce(`This ${kind} doesn't have enough numbers to chart.`);
+    return;
+  }
+  let note = "";
+  if (state.picks.kind && state.picks.kind !== kind) {
+    clearPicks();
+    note = `Started a new chart of ${kind}s. `;
+  }
+  state.picks.kind = kind;
+  const at = state.picks.items.indexOf(index);
+  const added = at === -1;
+  if (added) state.picks.items.push(index);
+  else state.picks.items.splice(at, 1);
+  markPick(kind, index, added);
+
+  const names = state.picks.items.map((i) => (kind === "row" ? rowLine(i) : columnLine(i)).name);
+  const now = names.length
+    ? `Your chart: ${listed(names)}. Press 4 to see it.`
+    : "Your chart is empty.";
+  voice.announce(`${note}${line.name} ${added ? "added" : "removed"}. ${now}`);
+}
+
+// A visible outline on the picked row's label or the picked column's header.
+function markPick(kind, index, on) {
+  const row = kind === "row" ? index : state.sheet.header_row;
+  const col = kind === "row" ? state.sheet.label_col : index;
+  gridEl.querySelector(`td[data-row="${row}"][data-col="${col}"]`)?.classList.toggle("picked", on);
+}
+
+function clearPicks() {
+  for (const i of state.picks.items) markPick(state.picks.kind, i, false);
+  state.picks = { kind: null, items: [] };
+}
+
+// N / Shift+N in the chart view: the chart's marked points, wrapping round.
+function nextMarkedPoint(step) {
+  const marked = [...state.chart.markedBySeries[state.chart.series]].sort((a, b) => a - b);
+  if (!marked.length) {
+    voice.announce("No marked points on this line.");
+    return;
+  }
+  const here = state.chart.point;
+  const ahead = step > 0 ? marked.find((i) => i > here) : [...marked].reverse().find((i) => i < here);
+  state.chart.point = ahead ?? (step > 0 ? marked[0] : marked[marked.length - 1]);
+  focusPoint();
+  const at = marked.indexOf(state.chart.point) + 1;
+  announcePoint(`${at} of ${marked.length}. `);
+}
+
+function inChartView() {
+  return state.mode === "chart" && Boolean(state.chart?.chart?.drawn);
+}
+
+// The comparable columns of one row, left to right.
+function rowChart(row) {
+  const line = rowLine(row);
+  if (!line) return null;
+  const measure = state.sheet.value_label;
+  return finishChart(`drawn-row-${row}`, measure ? `${line.name}: ${measure}` : line.name, [line]);
+}
+
+// One row as a line: the comparable columns, left to right.
+function rowLine(row) {
+  if (row === state.sheet.header_row) return null;
+  const points = chartColumns().map((col) => chartPoint(cellAt(row, col), colHeader(col)));
+  return { name: rowLabel(row) || `Row ${row}`, points };
+}
+
+// One column as a line: top to bottom, labelled by the rows.
+function columnLine(col) {
+  if (col === state.sheet.label_col) return null;
+  const points = [];
+  for (let row = state.sheet.header_row + 1; row <= state.sheet.n_rows; row++) {
+    points.push(chartPoint(cellAt(row, col), rowLabel(row) || `Row ${row}`));
+  }
+  return { name: spokenHeader(colHeader(col)) || `Column ${columnLetter(col)}`, points };
+}
+
+// One column, top to bottom, labelled by the rows.
+function columnChart(col) {
+  const line = columnLine(col);
+  return line ? finishChart(`drawn-col-${col}`, line.name, [line]) : null;
+}
+
+// The chart the listener built with M / Shift+M: all picked rows, or all picked
+// columns, as lines on one chart.
+function pickedChart() {
+  const { kind, items } = state.picks;
+  const lines = items.map((i) => (kind === "row" ? rowLine(i) : columnLine(i))).filter(Boolean);
+  const names = lines.map((l) => l.name);
+  const measure = kind === "row" ? state.sheet.value_label : "";
+  const title = listed(names) + (measure ? `: ${measure}` : "");
+  return finishChart("drawn-picked", title, lines, { picked: true });
+}
+
+// The sheet's main series (the engine's series_cols), else every numeric column.
+function chartColumns() {
+  if (state.sheet.series_cols?.length) return state.sheet.series_cols;
+  const cols = [];
+  for (let col = 1; col <= state.sheet.n_cols; col++) {
+    if (col === state.sheet.label_col) continue;
+    const cell = cellAt(state.sheet.header_row + 1, col);
+    if (typeof cell?.value === "number") cols.push(col);
+  }
+  return cols;
+}
+
+function chartPoint(cell, category) {
+  return {
+    category: category || "",
+    value: typeof cell?.value === "number" ? cell.value : null,
+    display: cell?.display || "",
+    ref: cell?.ref || null,
+  };
+}
+
+// lines: [{ name, points }]. Lines with fewer than two numbers are left out.
+// markedBySeries: for each line, the points whose cell has a cue.
+function finishChart(id, title, lines, extra = {}) {
+  const usable = lines.filter((l) => l.points.filter((p) => p.value !== null).length >= 2);
+  if (!usable.length) return null;
+  const markedBySeries = usable.map((line) => {
+    const marked = new Set();
+    line.points.forEach((p, i) => {
+      const cell = p.ref && state.cellsByRef.get(p.ref);
+      if (cell && pointCues(cell).length) marked.add(i);
+    });
+    return marked;
+  });
+  const chart = { id, kind: "line", title, drawn: true, series: usable, ...extra };
+  return { chart, markedBySeries };
+}
+
+// "Italy", "Italy and Germany", "Italy, France and Germany"
+function listed(names) {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+// The cue sentences for a chart point's source cell, under the current filter.
+function pointCues(cell) {
+  return cueSentences(cell.row, cell.col, cell).cueFacts;
+}
+
+// "Line chart of Italy: sales, January to December. Starts at €100,000 in
+// January and ends at €89,000 in December, down 11%. Highest …"
+// The chart's own summary, from the engine's measurements only (no AI): per line
+// its start and end (or, for lists that aren't a time series, its highest,
+// lowest and typical value), then how the lines compare, then marked points.
+function chartFacts(chart, markedBySeries) {
+  const lines = chart.series;
+  const first = lines[0].points;
+  const say = (p) => spokenHeader(p.category);
+  const parts = [
+    `Line chart of ${chart.title}, ${say(first[0])} to ${say(first[first.length - 1])}` +
+      (lines.length > 1 ? `. ${lines.length} lines` : ""),
+  ];
+  lines.forEach((line, s) => parts.push(...lineFacts(line, markedBySeries[s], lines.length > 1)));
+  if (lines.length > 1) parts.push(...compareLines(lines));
+  const moves = lines.length > 1
+    ? "Up and down switch line, left and right move between points"
+    : "Left and right move between points";
+  parts.push(`${moves}. Escape returns to the sheet`);
+  return parts.join(". ") + ".";
+}
+
+function lineFacts(line, marked, named) {
+  const valued = line.points.filter((p) => p.value !== null);
+  const say = (p) => spokenHeader(p.category);
+  const timeline = Boolean(timePhrase(valued[0].category));
+  const at = timeline ? "in" : "for";
+  const high = valued.reduce((a, b) => (b.value > a.value ? b : a));
+  const low = valued.reduce((a, b) => (b.value < a.value ? b : a));
+  const lead = named ? `${line.name}: ` : "";
+  const facts = [];
+  if (timeline) {
+    const a = valued[0];
+    const z = valued[valued.length - 1];
+    facts.push(`${lead}starts at ${a.display} ${at} ${say(a)} and ends at ${z.display} ${at} ${say(z)}${change(a.value, z.value)}`);
+    facts.push(`Highest ${high.display} ${at} ${say(high)}. Lowest ${low.display} ${at} ${say(low)}`);
+  } else {
+    // A list (orders, people, countries): start and end mean nothing here.
+    const middle = [...valued].sort((x, y) => x.value - y.value)[Math.floor(valued.length / 2)];
+    facts.push(`${lead}${valued.length} values. Highest ${high.display} ${at} ${say(high)}. ` +
+      `Lowest ${low.display} ${at} ${say(low)}. Typical value ${middle.display}`);
+  }
+  facts[0] = sentenceCase(facts[0]);
+
+  // Neighbouring points with the same cue are said once: "October to December: …".
+  const groups = [];
+  for (const i of [...marked].sort((x, y) => x - y)) {
+    const text = pointCues(state.cellsByRef.get(line.points[i].ref)).join(". ");
+    const last = groups[groups.length - 1];
+    if (last && last.text === text && last.to === i - 1) last.to = i;
+    else groups.push({ from: i, to: i, text });
+  }
+  const marks = groups.map(({ from, to, text }) =>
+    `${say(line.points[from])}${to > from ? ` to ${say(line.points[to])}` : ""}: ${text}`);
+  if (marks.length) {
+    const count = marked.size === 1 ? "1 marked point" : `${marked.size} marked points`;
+    const more = marks.length > 5 ? `, and ${marks.length - 5} more` : "";
+    facts.push(`${count}. ${marks.slice(0, 5).join(". ")}${more}`);
+  }
+  return facts;
+}
+
+// How the lines compare: who is highest at the start and at the end, and the
+// highest point of all. Measured, never judged.
+function compareLines(lines) {
+  const say = (p) => spokenHeader(p.category);
+  const facts = [];
+  const count = lines[0].points.length;
+  const ends = [0, count - 1].filter((i, n, all) => all.indexOf(i) === n);
+  for (const i of ends) {
+    const here = lines
+      .map((l) => ({ name: l.name, point: l.points[i] }))
+      .filter((x) => x.point && x.point.value !== null)
+      .sort((a, b) => b.point.value - a.point.value);
+    if (here.length < 2) continue;
+    const [top, next] = here;
+    const gap = top.point.value - next.point.value;
+    const unit = (top.point.display.match(/^[^\d-]*/) || [""])[0];
+    const where = timePhrase(top.point.category) ? "In" : "For";
+    facts.push(`${where} ${say(top.point)}, ${top.name} is highest at ${top.point.display}, ` +
+      `${unit}${Math.round(gap).toLocaleString("en-US")} above ${next.name}`);
+  }
+  let best = null;
+  for (const l of lines) {
+    for (const p of l.points) {
+      if (p.value !== null && (!best || p.value > best.point.value)) best = { name: l.name, point: p };
+    }
+  }
+  if (best) {
+    const where = timePhrase(best.point.category) ? "in" : "for";
+    facts.push(`Highest point of all: ${best.name}, ${best.point.display} ${where} ${say(best.point)}`);
+  }
+  return facts;
+}
+
+// ", up 40%" / ", down 11%" / ", about the same"
+function change(first, last) {
+  if (!first) return "";
+  const pct = Math.round((100 * (last - first)) / Math.abs(first));
+  if (pct === 0) return ", about the same";
+  return `, ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}%`;
+}
+
+// A point on a drawn chart: its cues first (with the chime), then where and what.
+// The point's note comes first (its height); a marked point then chimes.
+function announceDrawnPoint(prefix, line, data, withNote = true) {
+  state.chart.speakingSummary = false;
+  const cell = data.ref && state.cellsByRef.get(data.ref);
+  const found = cell ? pointCues(cell) : [];
+  const who = state.chart.chart.series.length > 1 ? `${line.name}. ` : "";
+  const said = `${who}${spokenHeader(data.category)}. ${data.display || "blank"}.`;
+  const noteMs = withNote ? playPointNote(state.chart.point) : 0;
+  let soundMs = noteMs;
+  if (found.length) {
+    const type = topSignal(cell) || "visual";
+    setTimeout(() => cues.play(type), noteMs);
+    soundMs = noteMs + cues.length(type);
+  } else if (!noteMs) {
+    soundMs = cues.play("tick");
+  }
+  voice.announce(prefix + (found.length ? `${found.join(". ")}. ${said}` : said), {
+    priority: found.length ? "assertive" : "polite",
+    delay: soundMs,
+  });
 }
 
 // ---------- Trend Scan ----------
@@ -796,7 +1266,8 @@ function announceFocus(prefix = "", suffix = "") {
     return;
   }
 
-  const text = state.mode === "explore" ? describeCell(row, col) : describeConcise(row, col);
+  const full = state.mode === "explore" || state.mode === "chart";
+  const text = full ? describeCell(row, col) : describeConcise(row, col);
   voice.announce(prefix + text + suffix, {
     priority: type ? "assertive" : "polite",
     delay: soundMs,
@@ -1057,7 +1528,7 @@ function chartNoteFor(ref) {
 function focusPoint() {
   const cell = state.cellsByRef.get(currentPoint().data.ref);
   if (cell) setFocus(cell.row, cell.col);
-  chartView.highlight(state.chart.point);
+  chartView.highlight(state.chart.point, state.chart.series);
 }
 
 // The drawn chart: shown only when the sheet has one, hidden and empty otherwise.
@@ -1076,8 +1547,9 @@ function renderChartPanel() {
 }
 
 // "Chart. Pattern cue. Italy. August. €62,000. Lowest point, largest fall."
-function announcePoint(prefix = "") {
+function announcePoint(prefix = "", withNote = true) {
   const { line, data } = currentPoint();
+  if (state.chart.chart.drawn) return announceDrawnPoint(prefix, line, data, withNote);
   const item = itemAtPoint();
   const name = line.name || state.chart.chart.title || "Line";
   const said = `${name}. ${spokenHeader(data.category)}. ${data.display || "blank"}.`;
@@ -1148,6 +1620,8 @@ function chartHint() {
 // W in the chart: the prepared explanation. At a point that shares a flagged
 // cell's stop, the cell's own explanation comes first, then the chart's.
 function explainPoint() {
+  // A chart drawn in Chart mode: its points are the grid's own cells.
+  if (state.chart.chart.drawn) return explainCell();
   const item = itemAtPoint();
   if (!item) {
     voice.announce("No cues at this point.");
@@ -1202,30 +1676,49 @@ function goToItem(i) {
 // Chart keys only take over while a chart is open (arrows, Escape) or when the
 // sheet has chart events (N, Space). Otherwise every key does what it always did.
 const KEY_ACTIONS = {
-  ArrowUp: () => (state.chart ? chartHint() : move(-1, 0)),
-  ArrowDown: () => (state.chart ? chartHint() : move(1, 0)),
+  ArrowUp: () => (inChartView() ? stepChart(-1) : state.chart ? chartHint() : move(-1, 0)),
+  ArrowDown: () => (inChartView() ? stepChart(1) : state.chart ? chartHint() : move(1, 0)),
   ArrowLeft: () => (state.chart ? movePoint(-1) : move(0, -1)),
   ArrowRight: () => (state.chart ? movePoint(1) : move(0, 1)),
-  " ": (event) => nextSignal(event.shiftKey ? -1 : 1),
-  n: (event) => nextSignal(event.shiftKey ? -1 : 1),
-  g: enterChart,
+  " ": (event) => (inChartView() ? nextMarkedPoint : nextSignal)(event.shiftKey ? -1 : 1),
+  n: (event) => (inChartView() ? nextMarkedPoint : nextSignal)(event.shiftKey ? -1 : 1),
+  g: () => (inChartView()
+    ? voice.announce("Press Escape to bring the table back, then G for the workbook's own chart.")
+    : enterChart()),
   1: () => setMode("explore"),
   2: () => setMode("concise"),
   3: () => setMode("scan"),
+  4: () => setMode("chart"),
   f: cycleFilter,
-  o: speakOverview,
+  // In the chart view, O is the chart's own summary.
+  o: () => {
+    if (!inChartView()) return speakOverview();
+    state.chart.speakingSummary = true;
+    voice.announce(chartFacts(state.chart.chart, state.chart.markedBySeries));
+  },
+  m: (event) => (inChartView()
+    ? voice.announce("Press Escape to go back to the table, then M to change your chart.")
+    : togglePick(event.shiftKey ? "column" : "row")),
   w: explainFocus,
   "?": explainFocus,
   d: describeFocus,
   l: () => startLoadingDemo(),
   k: () => startLoadingChartDemo(),
   u: () => chooseFile(),
-  r: () => (state.mode === "scan" ? playTones("row") : readRow()),
-  c: () => (state.mode === "scan" ? playTones("column") : readColumn()),
+  r: () => (state.mode === "scan" ? playTones("row") : state.mode === "chart" ? openChartView("row") : readRow()),
+  c: () => (state.mode === "scan" ? playTones("column") : state.mode === "chart" ? openChartView("column") : readColumn()),
   h: () => voice.announce(hasChart() ? HELP_TEXT + CHART_HELP : HELP_TEXT),
   s: stopSpeaking,
   // In a chart, Escape first returns to the sheet; otherwise it stops speaking.
-  Escape: () => (state.chart ? leaveChart(true) : stopSpeaking()),
+  // Escape: out of the chart view back to the table, out of a workbook chart,
+  // or else stop speaking.
+  Escape: () => {
+    if (state.mode === "chart") {
+      setMode("explore");
+      voice.announce(`Back to the table. Explore mode. ${columnLetter(state.focus.col)}${state.focus.row}.`);
+    } else if (state.chart) leaveChart(true);
+    else stopSpeaking();
+  },
 };
 
 // S, Escape or the Stop speaking button: silence the voice and any tones.
@@ -1337,7 +1830,8 @@ document.getElementById("load-demo").addEventListener("click", startLoadingDemo)
 for (const button of document.querySelectorAll("button.mode")) {
   button.addEventListener("click", () => {
     setMode(button.dataset.mode);
-    gridEl.focus();
+    // Focus back to the grid area, without scrolling the chart under the mouse.
+    gridEl.focus({ preventScroll: true });
   });
 }
 

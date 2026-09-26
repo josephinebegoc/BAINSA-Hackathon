@@ -55,16 +55,28 @@ export function announce(text, { priority = "polite", delay = 0 } = {}) {
   clearTimeout(pending);
   if (settings.mode === "self") {
     synth.cancel(); // silence the previous cell straight away
-    if (delay > 0) pending = setTimeout(() => speak(text), delay);
+    if (delay > 0) {
+      pending = setTimeout(() => {
+        pending = null;
+        speak(text);
+      }, delay);
+    }
     else speak(text);
   } else {
     writeLive(text, priority, delay);
   }
 }
 
+// True while self-voicing speech is playing or about to start.
+export function isSpeaking() {
+  if (settings.mode !== "self" || !synth) return false;
+  return synth.speaking || synth.pending || pending !== null;
+}
+
 export function stop() {
   if (synth) synth.cancel();
   clearTimeout(pending);
+  pending = null;
   regions.polite.textContent = "";
   regions.assertive.textContent = "";
 }

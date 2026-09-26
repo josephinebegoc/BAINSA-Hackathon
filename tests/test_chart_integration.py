@@ -19,14 +19,9 @@ XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 DEMO_OVERVIEW = (
     "European Sales 2026. Sales. 8 rows by 14 columns, from Country to Growth vs Jan. "
     "Typical values are €97,000 under Jan and 177,000 under Dec. "
-    "There is one line chart, Italy: Monthly Sales 2026, showing Italy from January "
-    "to December. "
     "6 cells flagged: 3 author visual cues, 1 statistical cue, 1 pattern cue and "
-    "1 functional cue. "
-    "On the chart: the largest rise is in March; the highest point is in July; the "
-    "lowest point and largest fall are in August, where the cell is also flagged. "
-    "Press N to go to the first."
-)
+    "1 functional cue. Press N to go to the first."
+)  # Charts are described on request (Chart mode, or G), not in the overview.
 
 
 @pytest.fixture(scope="module")
@@ -96,7 +91,7 @@ def test_chart_only_stops_carry_their_explanation(body):
     assert july["explanation"] == "Italy's highest value on this chart is €154,000, in July."
 
 
-def test_the_overview_names_the_chart_and_its_cues(body):
+def test_the_overview_leaves_the_chart_to_chart_mode(body):
     assert body["overview"] == DEMO_OVERVIEW
 
 
@@ -160,12 +155,14 @@ def test_no_chart_events_means_no_combined_order():
     assert chart_attention.attention_items(model) == []
 
 
-def test_chart_cues_are_announced_even_when_no_cell_is_flagged():
+def test_charts_stay_out_of_the_overview_but_n_still_reaches_their_points():
+    # Charts are described on request (Chart mode, or G), not in the summary.
     model = sheet([10, 20, 30, 5])
     model.attention_items = chart_attention.attention_items(model)
     text = overview.overview_for(model)
-    assert "No cells are flagged. On the chart:" in text
-    assert text.endswith("Press N to go to the first.")
+    assert "chart" not in text.split("No cells are flagged.")[0].lower()
+    assert "On the chart:" not in text
+    assert text.endswith("No cells are flagged. Press N to go through the chart's marked points.")
 
 
 def test_a_sheet_without_a_chart_gets_the_same_overview_as_before():

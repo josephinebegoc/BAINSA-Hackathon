@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Screen readers read the title as the page opens, so it says how to begin. -->
-  <title>Press any key to start, L for the demo, or U to upload – Glance</title>
+  <title>Press any key to start, L for the demo, K for the chart demo, or U to upload – Glance</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
@@ -14,9 +14,9 @@
        everything audible starts here. It covers the whole screen so it can be
        found without seeing it: tap anywhere, click anywhere, or press any key. -->
   <button type="button" id="start" autofocus
-          aria-label="Start. Press any key or tap anywhere to turn on sound. Press L to load the demo sheet, or U to upload your own spreadsheet.">
+          aria-label="Start. Press any key or tap anywhere to turn on sound. Press L to load the demo sheet, K for the chart demo, or U to upload your own spreadsheet.">
     <span class="start-word">Start</span>
-    <span class="start-hint">Press any key to start · L loads the demo · U uploads your own</span>
+    <span class="start-hint">Press any key to start · L demo · K chart demo · U upload your own</span>
   </button>
 
   <header class="app-header">
@@ -42,7 +42,7 @@
       <p class="eyebrow">Workbook</p>
       <h2 id="sheet-title" hidden></h2>
       <p id="sheet-facts" aria-hidden="true"></p>
-      <p id="status">Press L for the demo sheet, or U to upload your own spreadsheet.</p>
+      <p id="status">Press L for the demo sheet, K for the chart demo, or U to upload your own spreadsheet.</p>
       <p class="eyebrow">Last spoken</p>
       <!-- Shows the last announcement for sighted viewers. Hidden from screen
            readers, which hear the same text through the live regions below. -->
@@ -62,8 +62,12 @@
           <span class="mode-desc">Hear values only</span>
         </button>
         <button type="button" class="mode" data-mode="scan" aria-pressed="false" aria-keyshortcuts="3">
-          <span class="mode-top"><kbd>3</kbd> <span class="mode-name">Sound Graph</span></span>
-          <span class="mode-desc">Hear a row like a line chart</span>
+          <span class="mode-top"><kbd>3</kbd> <span class="mode-name">Piano</span></span>
+          <span class="mode-desc">Hear a row played as notes</span>
+        </button>
+        <button type="button" class="mode" data-mode="chart" aria-pressed="false" aria-keyshortcuts="4">
+          <span class="mode-top"><kbd>4</kbd> <span class="mode-name">Chart</span></span>
+          <span class="mode-desc">See and hear a chart; build your own with M</span>
         </button>
       </div>
       <details class="mode-examples">
@@ -73,8 +77,10 @@
           <dd>Every cell with its row, column and value: “Italy. August revenue. €62,000.”</dd>
           <dt>Concise</dt>
           <dd>Just the values, to move quickly: “€100,000 … €110,000 … €121,000.” Flagged cells still speak.</dd>
-          <dt>Sound Graph</dt>
+          <dt>Piano</dt>
           <dd>Ordinary numbers stay silent. Press <kbd>R</kbd> to play the row as tones, <kbd>C</kbd> the column. Higher values play higher notes, and the notes move from left to right across the row, like a line chart you can hear.</dd>
+          <dt>Chart</dt>
+          <dd>Build your own chart first if you like: <kbd>M</kbd> adds the current row, <kbd>Shift+M</kbd> the column (press again to remove). The chart replaces the table, with its own summary: where the row starts and ends, its highest and lowest points and anything marked. Move the mouse or a finger across the chart to hear it: higher values play higher notes, like Piano mode. Up and down change row, left and right move between points, <kbd>C</kbd> charts the column, <kbd>O</kbd> repeats the summary, <kbd>Esc</kbd> brings the table back.</dd>
         </dl>
       </details>
     </section>
@@ -136,11 +142,12 @@
         <li><kbd>L</kbd> load the demo sheet</li>
         <li><kbd>U</kbd> upload your own spreadsheet</li>
         <li><kbd>D</kbd> describe everything about this cell</li>
-        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column (as tones in Sound Graph)</li>
-        <li><kbd>1</kbd> Explore · <kbd>2</kbd> Concise · <kbd>3</kbd> Sound Graph</li>
+        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column (as notes in Piano mode)</li>
+        <li><kbd>1</kbd> Explore · <kbd>2</kbd> Concise · <kbd>3</kbd> Piano · <kbd>4</kbd> Chart (the chart replaces the table)</li>
         <li><kbd>F</kbd> change which cues you hear (all, author, data, errors)</li>
         <li><kbd>G</kbd> explore the chart, if the sheet has one; <kbd>Left</kbd> / <kbd>Right</kbd> move between its points</li>
         <li><kbd>K</kbd> load the chart demo</li>
+        <li><kbd>M</kbd> / <kbd>Shift+M</kbd> add the row / column to your own chart, then <kbd>4</kbd> to see it</li>
         <li><kbd>S</kbd> stop speaking · <kbd>Esc</kbd> stop speaking, or leave the chart</li>
         <li><kbd>H</kbd> hear these shortcuts</li>
       </ul>
