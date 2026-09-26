@@ -32,6 +32,10 @@
          aria-label="Spreadsheet. Use the arrow keys to move between cells. Press Space for the first flagged cell, N for the next one, and H for help.">
     </div>
 
+    <!-- The sheet's chart, drawn for sighted viewers. Listeners get the same chart
+         through speech (G), so it is hidden from screen readers. -->
+    <div id="chart-panel" hidden aria-hidden="true"></div>
+
     <!-- Shows the last announcement for sighted viewers. Hidden from screen
          readers, which hear the same text through the live regions below. -->
     <p id="caption" aria-hidden="true"></p>

@@ -2,6 +2,7 @@
 
 import * as voice from "./voice.js";
 import * as cues from "./cues.js";
+import * as chartView from "./chart.js";
 
 const FIXTURE_URL = "/fixtures/sample_sheet.json"; // offline copy, and ?fixture=1
 const DEMO_URL = "/demo/sales_demo.xlsx";
@@ -64,6 +65,7 @@ const gridEl = document.getElementById("grid");
 const statusEl = document.getElementById("status");
 const titleEl = document.getElementById("sheet-title");
 const startBtn = document.getElementById("start");
+const chartPanelEl = document.getElementById("chart-panel");
 
 // ---------- Loading ----------
 
@@ -143,6 +145,7 @@ function showSheet(sheet, note = "") {
     `Voice: ${voice.getVoiceName()}.`;
 
   renderGrid();
+  renderChartPanel();
   // Start on the first data cell, just below the header and right of the labels.
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
@@ -279,6 +282,8 @@ function setFocus(row, col) {
   td.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   state.focus = { row, col };
+  // Moving around the sheet: no chart point is being spoken any more.
+  if (!state.chart) chartView.highlight(null);
 }
 
 // ---------- What we say (EXPLORE) ----------
@@ -712,10 +717,27 @@ function chartNoteFor(ref) {
   return item?.events.length ? item.explanation : "";
 }
 
-// Keep the grid's focus on the point's source cell, so sighted viewers can follow.
+// Keep the grid's focus on the point's source cell, and the drawn chart's
+// highlight on the point itself, so sighted viewers can follow.
 function focusPoint() {
   const cell = state.cellsByRef.get(currentPoint().data.ref);
   if (cell) setFocus(cell.row, cell.col);
+  chartView.highlight(state.chart.point);
+}
+
+// The drawn chart: shown only when the sheet has one, hidden and empty otherwise.
+function renderChartPanel() {
+  if (!hasChart()) {
+    chartView.clear(chartPanelEl);
+    chartPanelEl.hidden = true;
+    return;
+  }
+  const chart = state.sheet.charts[0];
+  const cuePoints = new Set(
+    attentionItems().filter((it) => it.chart === chart.id && it.series === 0).map((it) => it.point)
+  );
+  chartView.render(chartPanelEl, chart, cuePoints);
+  chartPanelEl.hidden = false;
 }
 
 // "Chart. Pattern cue. Italy. August. €62,000. Lowest point, largest fall."
@@ -777,6 +799,7 @@ function leaveChart(announce) {
   if (!state.chart) return;
   statusEl.textContent = state.chart.status;
   state.chart = null;
+  chartView.highlight(null); // the chart stays visible, with no active point
   if (announce) {
     voice.stop();
     voice.announce(`Back to the sheet. ${columnLetter(state.focus.col)}${state.focus.row}.`);
@@ -833,6 +856,8 @@ function goToItem(i) {
   const cell = state.cellsByRef.get(item.ref);
   if (!cell) return;
   setFocus(cell.row, cell.col);
+  // A cell stop the chart also marks (August): show that point on the chart too.
+  if (item.events.length) chartView.highlight(item.point);
   const alsoChart = item.events.length ? ` Also on the chart: ${chartLabels(item).toLowerCase()}` : "";
   announceFocus(prefix, alsoChart);
 }
