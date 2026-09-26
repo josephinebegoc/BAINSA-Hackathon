@@ -7,19 +7,21 @@ const FIXTURE_URL = "/fixtures/sample_sheet.json";
 
 // Short letters on the corner badges, so colour is never the only clue.
 const SIGNAL_LETTERS = { visual: "V", anomaly: "A", trend: "T", error: "E" };
+// The four cues: four kinds of information recovered for the listener.
+// The type values are the wire format; these names are for people.
 const SIGNAL_NAMES = {
-  visual: "Highlighted by the author",
-  anomaly: "Unusual value",
-  trend: "Trend change",
-  error: "Formula error",
+  visual: "Author visual cue",
+  anomaly: "Statistical cue",
+  trend: "Pattern cue",
+  error: "Functional cue",
 };
 
 // The short label appended when a flagged cell is announced.
 // The full reason only comes when the user presses W.
 const SIGNAL_SPOKEN = {
-  visual: "Highlighted",
+  visual: "Highlighted by the author",
   anomaly: "Unusual value",
-  trend: "Trend change",
+  trend: "Breaks a trend",
   error: "Formula error",
 };
 
@@ -147,6 +149,7 @@ function renderCell(row, col) {
   if (typeof cell.value === "number") td.classList.add("number");
   if (cell.error) td.classList.add("error");
   applyFill(td, cell.fill);
+  applyFontColor(td, cell.font_color);
 
   const types = [...new Set(cell.signals.map((s) => s.type))];
   if (types.length) {
@@ -179,6 +182,13 @@ function applyFill(td, fill) {
   // Keep text readable on dark fills.
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
   if (0.299 * r + 0.587 * g + 0.114 * b < 140) td.classList.add("dark-fill");
+}
+
+// Show the author's text colour too: it can carry meaning (e.g. red = bad).
+function applyFontColor(td, color) {
+  const hex = color?.slice(-6);
+  if (!hex || !/^[0-9a-f]{6}$/i.test(hex)) return;
+  td.style.color = `#${hex}`;
 }
 
 // ---------- Focus ----------
