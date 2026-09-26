@@ -3,7 +3,12 @@
 import * as voice from "./voice.js";
 import * as cues from "./cues.js";
 
-const FIXTURE_URL = "/fixtures/sample_sheet.json";
+const FIXTURE_URL = "/fixtures/sample_sheet.json"; // offline copy, and ?fixture=1
+const DEMO_URL = "/demo/sales_demo.xlsx";
+// Margaux's server waits up to 5 s for the AI, then answers with its template;
+// we give it a little longer before using our own local explanation.
+const EXPLAIN_TIMEOUT_MS = 6000;
+const EXPLAIN_PATIENCE_MS = 800; // say "One moment" if the answer takes longer
 
 // Short letters on the corner badges, so colour is never the only clue.
 const SIGNAL_LETTERS = { visual: "V", anomaly: "A", trend: "T", error: "E" };
@@ -46,6 +51,7 @@ const state = {
   sheet: null,
   cellsByRef: new Map(),
   focus: null, // { row, col }
+  explanations: new Map(), // ref → text from /api/explain, for this sheet only
 };
 
 const gridEl = document.getElementById("grid");
@@ -55,21 +61,66 @@ const startBtn = document.getElementById("start");
 
 // ---------- Loading ----------
 
-async function loadFixture() {
+// Load demo: the demo workbook goes through exactly the same pipeline as a real
+// upload. If the server can't be reached, the offline copy keeps the demo alive.
+async function loadDemo() {
+  statusEl.textContent = "Opening the demo workbook…";
+  try {
+    const res = await fetch(DEMO_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const reached = await uploadWorkbook(await res.blob(), "sales_demo.xlsx");
+    if (reached) return;
+  } catch (err) {
+    console.error(err);
+  }
+  await loadFixture("I couldn't reach the server, so this is the offline copy of the demo.");
+}
+
+// POST a workbook to /api/upload and show the SheetModel it returns. Errors
+// from the server are sentences, so they are spoken as they are.
+// Returns false only if the server couldn't be reached at all.
+async function uploadWorkbook(file, name) {
+  const form = new FormData();
+  form.append("file", file, name);
+  let res;
+  let body;
+  try {
+    res = await fetch("/api/upload", { method: "POST", body: form });
+    body = await res.json();
+  } catch (err) {
+    console.error("[upload] server unreachable:", err);
+    return false;
+  }
+  if (!res.ok || body.error) {
+    const message = body.error || "Sorry, that spreadsheet could not be opened.";
+    statusEl.textContent = message;
+    voice.announce(message);
+    return true;
+  }
+  showSheet(body);
+  return true;
+}
+
+// The hand-written sample sheet: for development (?fixture=1) and offline demos.
+async function loadFixture(note = "") {
   statusEl.textContent = "Loading the sample sheet…";
   try {
     const res = await fetch(FIXTURE_URL);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    showSheet(await res.json());
+    showSheet(await res.json(), note);
   } catch (err) {
-    statusEl.textContent = "Sorry, the sample sheet could not be loaded.";
+    const message = "Sorry, the sample sheet could not be loaded.";
+    statusEl.textContent = message;
+    voice.announce(message);
     console.error(err);
   }
 }
 
-function showSheet(sheet) {
+// note: said before the overview, e.g. that this is the offline copy.
+function showSheet(sheet, note = "") {
   state.sheet = sheet;
   state.cellsByRef = new Map(sheet.cells.map((c) => [c.ref, c]));
+  state.explanations.clear();
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
@@ -81,8 +132,9 @@ function showSheet(sheet) {
   // Start on the first data cell, just below the header and right of the labels.
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
+  if (note) statusEl.textContent += ` ${note}`;
   // ORIENT: an instant spoken overview whenever a sheet opens.
-  voice.announce(orientation());
+  voice.announce(note ? `${note} ${orientation()}` : orientation());
 }
 
 // The overview, then what the user can do next.
@@ -466,18 +518,74 @@ function speakOverview() {
 }
 
 // UNDERSTAND. Phase 2 asks /api/explain first and keeps this as the fallback.
-function explainFocus() {
+// Asks /api/explain; on any failure uses localExplanation(). Answers are kept
+// per cell for this sheet, since the server remembers nothing.
+async function explainFocus() {
   const { row, col } = state.focus;
   const cell = cellAt(row, col);
   if (!cell?.signals.length) {
     voice.announce("No cues on this cell. Press D to describe it.");
     return;
   }
-  const where = [cell.row_label || rowLabel(row), cell.col_header || colHeader(col)]
+  const ref = cell.ref;
+  if (state.explanations.has(ref)) {
+    voice.announce(state.explanations.get(ref));
+    return;
+  }
+
+  const patience = setTimeout(() => voice.announce("One moment."), EXPLAIN_PATIENCE_MS);
+  const fromServer = await fetchExplanation(cell, row, col);
+  clearTimeout(patience);
+  if (fromServer) state.explanations.set(ref, fromServer);
+
+  // Don't talk over a cell the user has already moved on from.
+  if (state.focus.row !== row || state.focus.col !== col) return;
+  voice.announce(fromServer || localExplanation(cell, row, col));
+}
+
+async function fetchExplanation(cell, row, col) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EXPLAIN_TIMEOUT_MS);
+  try {
+    const res = await fetch("/api/explain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        cell,
+        row_label: cell.row_label || rowLabel(row),
+        col_header: cell.col_header || colHeader(col),
+        row_values: rowValues(row),
+        signals: cell.signals,
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    return body.text?.trim() || null;
+  } catch (err) {
+    console.warn("[explain] using the local explanation:", err.message);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// The row's values, left to right, without its label: context for /api/explain.
+function rowValues(row) {
+  const values = [];
+  for (let col = 1; col <= state.sheet.n_cols; col++) {
+    if (col !== state.sheet.label_col) values.push(cellAt(row, col)?.value ?? null);
+  }
+  return values;
+}
+
+// Offline fallback: the engine's own facts, joined.
+function localExplanation(cell, row, col) {
+  const where = [cell.row_label || rowLabel(row), spokenHeader(cell.col_header || colHeader(col))]
     .filter(Boolean)
     .join(", ");
   const reasons = cell.signals.map((s) => s.detail).join(". ");
-  voice.announce(`${where}. ${reasons}.`);
+  return `${where}. ${reasons}.`;
 }
 
 // D: everything a sighted person could see about this cell, flagged or not.
@@ -609,15 +717,14 @@ startBtn.addEventListener("click", () => {
     return;
   }
   // Speaking inside the click is what unlocks speech on iPhones and iPads.
-  voice.announce("Loading the sample sheet.");
-  loadFixture();
+  voice.announce("Opening the demo workbook.");
+  loadDemo();
 });
 
 document.getElementById("load-demo").addEventListener("click", () => {
-  // Phase 2 switches this to /demo/sales_demo.xlsx → /api/upload.
   cues.unlock(); // this click is what lets the browser play sound later
   startBtn.hidden = true; // sound is unlocked now, so Start has done its job
-  loadFixture();
+  loadDemo();
 });
 
 // Test switches until the visible controls exist (Phase 3):
