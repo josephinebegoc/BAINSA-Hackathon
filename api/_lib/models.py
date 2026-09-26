@@ -89,6 +89,7 @@ class ChartEvent(BaseModel):
     id: str                       # "chart1/s1/largest_decrease"
     kind: ChartEventKind
     series: str | None = None     # "Italy"
+    series_index: int = 0         # index into the chart's series
     point: int                    # index of the point the event lands on
     ref: str | None = None        # its source cell, "I2"
     category: str                 # "Aug"
@@ -121,6 +122,25 @@ class Chart(BaseModel):
     events: list[ChartEvent] = Field(default_factory=list)
 
 
+class AttentionItem(BaseModel):
+    """One stop in the N / Shift+N order: a flagged cell, a chart point, or both.
+
+    One stop per place. Chart events on the same point share a stop, and a chart
+    point whose source cell is already flagged for the same pattern joins that
+    cell's stop instead of adding a second one.
+    """
+
+    kind: Literal["cell", "chart"]    # where N lands: the grid, or the chart
+    ref: str | None = None            # the flagged cell, or the chart point's source cell
+    chart: str | None = None          # "chart1", when chart events are at this stop
+    series: int | None = None         # index into that chart's series
+    point: int | None = None          # index into that series' points
+    events: list[str] = Field(default_factory=list)   # ChartEvent ids at this stop
+    labels: list[str] = Field(default_factory=list)   # "Lowest point: August", ...
+    severity: Severity
+    explanation: str = ""             # what the chart says here, for "Why?"
+
+
 class SheetModel(BaseModel):
     """A whole worksheet, ready for the browser to render and narrate."""
 
@@ -148,6 +168,10 @@ class SheetModel(BaseModel):
     # Charts embedded in the sheet. Empty for a sheet without one, which then
     # behaves exactly as it did before charts were read at all.
     charts: list[Chart] = Field(default_factory=list)
+
+    # The N / Shift+N order across cells and charts. Empty unless a chart has
+    # events; the browser then walks attention_order exactly as before.
+    attention_items: list[AttentionItem] = Field(default_factory=list)
 
 
 # --- API request/response bodies -------------------------------------------
@@ -182,6 +206,8 @@ class OverviewFacts(BaseModel):
     last_value: str = ""                  # ...and at the other end of that series
     last_value_header: str = ""
     signal_counts: dict[str, int] = Field(default_factory=dict)
+    charts: list[str] = Field(default_factory=list)   # one sentence per chart, if any
+    chart_cues: str = ""                  # where the chart's events are, if any
 
 
 class TextResponse(BaseModel):

@@ -28,6 +28,7 @@ from fastapi import FastAPI, File, UploadFile  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 from _lib import attention  # noqa: E402
+from _lib import chart_attention  # noqa: E402
 from _lib.explain import explain as explain_cell  # noqa: E402
 from _lib.explain import template as explain_template  # noqa: E402
 from _lib.extract import extract  # noqa: E402
@@ -120,6 +121,14 @@ async def upload(file: UploadFile = File(...)):
     except Exception:
         # A sheet we cannot analyse is still a sheet the user can explore.
         model.attention_order = []
+
+    # Charts: their events, then one N order across cells and charts. Both stay
+    # empty for a sheet without a chart, which then behaves exactly as before.
+    try:
+        chart_attention.apply_chart_events(model.charts, step_word)
+        model.attention_items = chart_attention.attention_items(model)
+    except Exception:
+        model.attention_items = []
 
     try:
         model.overview = overview_for(model)

@@ -19,12 +19,19 @@ analyse keeps its points and simply has no events.
 """
 
 from .explain import spoken_header
-from .models import Chart, ChartEvent, ChartPoint, ChartSeries, Signal
+from .models import (AttentionItem, Chart, ChartEvent, ChartPoint, ChartSeries,
+                     SheetModel, Signal)
 
 MIN_POINTS = 3        # fewer numbers than this and "highest" or "steepest" says nothing
 
 # Events on the same point are listed in this order.
 _KIND_ORDER = {"highest": 0, "lowest": 1, "largest_increase": 2, "largest_decrease": 3}
+
+# What each event is called when several share one stop: "lowest point and largest fall".
+KIND_NAMES = {"highest": "highest point", "lowest": "lowest point",
+              "largest_increase": "largest rise", "largest_decrease": "largest fall"}
+
+_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 
 
 def apply_chart_events(charts: list[Chart], step_word: str | None = None) -> None:
@@ -39,9 +46,10 @@ def apply_chart_events(charts: list[Chart], step_word: str | None = None) -> Non
 def chart_events(chart: Chart, step_word: str | None = None) -> list[ChartEvent]:
     """All events on one chart, series by series, left to right."""
     events: list[ChartEvent] = []
-    for index, series in enumerate(chart.series, start=1):
-        events.extend(series_events(series, f"{chart.id}/s{index}", step_word,
-                                    fallback_name=chart.title))
+    for index, series in enumerate(chart.series):
+        found = series_events(series, f"{chart.id}/s{index + 1}", step_word,
+                              fallback_name=chart.title)
+        events.extend(e.model_copy(update={"series_index": index}) for e in found)
     return events
 
 
@@ -136,6 +144,73 @@ def _move(kind: str, moves: list[tuple[int, ChartPoint, int, ChartPoint]],
                       detail=f"Largest {noun}: {_when(after.category)}"),
         explanation=sentence,
     )
+
+
+# --- one N order across cells and charts ------------------------------------------------
+
+def attention_items(model: SheetModel) -> list[AttentionItem]:
+    """The combined N / Shift+N order: one stop per place.
+
+    Cell stops come first, in exactly the existing attention_order. Chart stops
+    follow, left to right: they are all low severity, and the order is severity
+    first, as it always was.
+
+    Events on the same chart point share one stop. A chart point whose source cell
+    already carries a pattern cue is the same moment seen twice -- the cell's fall
+    and the chart's fall -- so it adds no stop of its own: the chart's facts join
+    the cell's stop instead.
+
+    Empty when no chart has events, so a sheet without charts is untouched.
+    """
+    if not any(chart.events for chart in model.charts):
+        return []
+
+    cells = {cell.ref: cell for cell in model.cells}
+    stops = {ref: AttentionItem(kind="cell", ref=ref, severity=_severity(cells[ref]))
+             for ref in model.attention_order if ref in cells}
+
+    chart_stops: list[AttentionItem] = []
+    for chart in model.charts:
+        for (series, point), events in _by_point(chart).items():
+            events.sort(key=lambda e: _KIND_ORDER[e.kind])
+            ref = events[0].ref
+            names = _listed([KIND_NAMES[e.kind] for e in events])
+            facts = " ".join(e.explanation for e in events)
+            where = dict(chart=chart.id, series=series, point=point,
+                         events=[e.id for e in events],
+                         labels=[e.signal.detail for e in events])
+
+            cell = cells.get(ref) if ref else None
+            if ref in stops and cell is not None and _has_pattern(cell):
+                # Same moment, one stop: the cell's stop also carries the chart.
+                on = f"On the chart, {chart.title}," if chart.title else "On the chart,"
+                stops[ref] = stops[ref].model_copy(update={
+                    **where,
+                    "explanation": f"{on} the same point is the {names}. {facts}",
+                })
+            else:
+                chart_stops.append(AttentionItem(kind="chart", ref=ref, severity="low",
+                                                 explanation=facts, **where))
+
+    return list(stops.values()) + chart_stops
+
+
+def _by_point(chart: Chart) -> dict[tuple[int, int], list[ChartEvent]]:
+    """Events grouped by the point they sit on, in series then point order."""
+    grouped: dict[tuple[int, int], list[ChartEvent]] = {}
+    for event in chart.events:
+        grouped.setdefault((event.series_index, event.point), []).append(event)
+    return dict(sorted(grouped.items()))
+
+
+def _severity(cell) -> str:
+    return min((s.severity for s in cell.signals), key=_SEVERITY_RANK.__getitem__,
+               default="low")
+
+
+def _has_pattern(cell) -> bool:
+    """The cell engine already flagged this cell for a rise or fall (a pattern cue)."""
+    return any(s.type == "trend" for s in cell.signals)
 
 
 # --- words -----------------------------------------------------------------------------

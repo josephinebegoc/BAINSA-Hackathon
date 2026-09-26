@@ -17,7 +17,8 @@ import os
 import statistics
 
 from . import attention
-from .explain import JUDGEMENT_WORDS, _acceptable
+from .chart_attention import KIND_NAMES
+from .explain import JUDGEMENT_WORDS, _acceptable, spoken_header
 from .models import OverviewFacts, SheetModel, TextResponse
 
 CUE_NAMES = {
@@ -79,7 +80,53 @@ def facts_for(model: SheetModel) -> OverviewFacts:
         last_value=_typical(model, last_col) if last_col else "",
         last_value_header=model.col_headers[last_col - 1] if last_col else "",
         signal_counts=counts,
+        charts=[_chart_sentence(chart) for chart in model.charts],
+        chart_cues=_chart_cues(model),
     )
+
+
+# --- charts ------------------------------------------------------------------------
+# Only ever present when the sheet has a chart; otherwise the overview is unchanged.
+
+CHART_KIND_WORDS = {"line": "line chart"}
+
+
+def _chart_sentence(chart) -> str:
+    """"There is one line chart, Italy: Monthly Sales 2026, showing Italy from
+    January to December." Title, type, series and categories, as the chart has them."""
+    kind = CHART_KIND_WORDS.get(chart.kind, "chart")
+    title = f", {chart.title}," if chart.title else ", without a title,"
+    names = [s.name for s in chart.series if s.name]
+    showing = (f" showing {_listed(names)}" if names
+               else f" with {_plural(len(chart.series), 'line')}")
+    points = chart.series[0].points if chart.series else []
+    span = (f" from {spoken_header(points[0].category)} to {spoken_header(points[-1].category)}"
+            if len(points) > 1 else "")
+    return f"There is one {kind}{title}{showing}{span}."
+
+
+def _chart_cues(model: SheetModel) -> str:
+    """Where the chart's events are, one phrase per place, left to right.
+
+    "On the chart: the largest rise is in March; the highest point is in July; the
+    lowest point and largest fall are in August, where the cell is also flagged."
+    """
+    events = {e.id: e for chart in model.charts for e in chart.events}
+    places = [item for item in model.attention_items if item.events]
+    places.sort(key=lambda item: (item.chart or "", item.series or 0, item.point or 0))
+    phrases = []
+    for item in places:
+        kinds = [events[i].kind for i in item.events if i in events]
+        if not kinds:
+            continue
+        names = _listed([KIND_NAMES[k] for k in kinds])
+        verb = "is" if len(kinds) == 1 else "are"
+        when = spoken_header(events[item.events[0]].category)
+        phrase = f"the {names} {verb} in {when}"
+        if item.kind == "cell":
+            phrase += ", where the cell is also flagged"
+        phrases.append(phrase)
+    return f"On the chart: {'; '.join(phrases)}." if phrases else ""
 
 
 def _listed(items: list[str]) -> str:
@@ -109,6 +156,8 @@ def template(facts: OverviewFacts) -> str:
                      f"{facts.first_value_header} and {facts.last_value} under "
                      f"{facts.last_value_header}.")
 
+    parts.extend(facts.charts)
+
     total = sum(facts.signal_counts.values())
     if not total:
         parts.append("No cells are flagged.")
@@ -116,6 +165,9 @@ def template(facts: OverviewFacts) -> str:
         named = [_plural(facts.signal_counts[k], CUE_NAMES[k])
                  for k in CUE_ORDER if facts.signal_counts.get(k)]
         parts.append(f"{_plural(total, 'cell')} flagged: {_listed(named)}.")
+    if facts.chart_cues:
+        parts.append(facts.chart_cues)
+    if total or facts.chart_cues:
         parts.append("Press N to go to the first.")
 
     return " ".join(parts)
