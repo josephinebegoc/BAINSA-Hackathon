@@ -9,20 +9,13 @@ const FIXTURE_URL = "/fixtures/sample_sheet.json";
 const SIGNAL_LETTERS = { visual: "V", anomaly: "A", trend: "T", error: "E" };
 // The four cues: four kinds of information recovered for the listener.
 // The type values are the wire format; these names are for people.
+// They are also the short label spoken on a flagged cell: they say what kind
+// of cue it is, never what to think of it. W gives the facts.
 const SIGNAL_NAMES = {
   visual: "Author visual cue",
   anomaly: "Statistical cue",
   trend: "Pattern cue",
   error: "Functional cue",
-};
-
-// The short label appended when a flagged cell is announced.
-// The full reason only comes when the user presses W.
-const SIGNAL_SPOKEN = {
-  visual: "Highlighted by the author",
-  anomaly: "Unusual value",
-  trend: "Breaks a trend",
-  error: "Formula error",
 };
 
 // Which cue to play when a cell has several signals.
@@ -41,8 +34,8 @@ const ERROR_WORDS = {
 
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
-  "N jumps to the next important cell, Shift N to the previous one. " +
-  "W explains why a cell is important. " +
+  "N jumps to the next flagged cell, Shift N to the previous one. " +
+  "W explains why a cell was flagged. " +
   "R reads the whole row, C the whole column. Escape stops speaking.";
 
 const state = {
@@ -82,7 +75,7 @@ function showSheet(sheet) {
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
   voice.announce(
-    `${sheet.title} loaded. Press O for an overview, N for important cells, or H for help.`
+    `${sheet.title} loaded. Press O for an overview, N for flagged cells, or H for help.`
   );
 }
 
@@ -228,7 +221,7 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "F3. Italy. May. €31,000. Unusual value."
+// "F3. Italy. May. €31,000. Statistical cue."
 function describeCell(row, col) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
@@ -246,7 +239,7 @@ function describeCell(row, col) {
   }
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
-  parts.push(...types.map((t) => SIGNAL_SPOKEN[t] || t));
+  parts.push(...types.map((t) => SIGNAL_NAMES[t] || t));
   return parts.join(". ") + ".";
 }
 
@@ -275,7 +268,7 @@ function move(dRow, dCol) {
 }
 
 // NOTICE: step through attention_order, wrapping around at either end.
-function jumpToImportant(step) {
+function jumpToFlagged(step) {
   const order = state.sheet.attention_order;
   if (!order.length) {
     voice.announce("Nothing in this sheet was flagged.");
@@ -303,7 +296,7 @@ function explainFocus() {
   const { row, col } = state.focus;
   const cell = cellAt(row, col);
   if (!cell?.signals.length) {
-    voice.announce("Nothing unusual was found in this cell.");
+    voice.announce("No cues on this cell.");
     return;
   }
   const where = [cell.row_label || rowLabel(row), cell.col_header || colHeader(col)]
@@ -352,7 +345,7 @@ const KEY_ACTIONS = {
   ArrowDown: () => move(1, 0),
   ArrowLeft: () => move(0, -1),
   ArrowRight: () => move(0, 1),
-  n: (event) => jumpToImportant(event.shiftKey ? -1 : 1),
+  n: (event) => jumpToFlagged(event.shiftKey ? -1 : 1),
   o: speakOverview,
   w: explainFocus,
   "?": explainFocus,
