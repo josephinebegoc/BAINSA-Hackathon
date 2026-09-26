@@ -300,7 +300,9 @@ Put the grid container at `role="application"` with an `aria-label` and a clear 
   and telling timbres apart is a harder task than hearing a word. One sound is
   learned instantly and never ambiguous.
 - If `navigator.vibrate` exists: flagged cell → `[60, 40, 60]`, error → `[200]`.
-- The announcement for a flagged cell appends a short label only: "Italy. May revenue. €31,000. Unusual value." The full reason comes only when the user presses `W`.
+- **The cue label comes first, before the cell, never appended.** "Pattern cue. Italy. Aug. Sales. €62,000." — not "Italy. Aug. Sales. €62,000. Pattern cue."
+- Why: the listener needs to know something is here *before* the content arrives, so they can decide to stop and attend to it. A label tacked on the end arrives after they have already moved on, and on a fast sweep across the grid it may not arrive at all. Same reason the earcon plays before the speech: signal first, then detail.
+- It stays a short label and nothing more. The full reason comes only when the user presses `W`.
 
 ## Demo data (scripts/make_demo.py, run locally only)
 
