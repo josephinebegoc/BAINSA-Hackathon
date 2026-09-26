@@ -75,6 +75,39 @@ class ChartSeries(BaseModel):
     points: list[ChartPoint] = Field(default_factory=list)
 
 
+ChartEventKind = Literal["highest", "lowest", "largest_increase", "largest_decrease"]
+
+
+class ChartEvent(BaseModel):
+    """Something a sighted reader sees at a glance on a line: its peak, its lowest
+    point, its steepest rise, its steepest fall.
+
+    Every number the "Why?" sentence uses is here as a field, so the sentence can
+    always be rebuilt or checked against the chart it came from.
+    """
+
+    id: str                       # "chart1/s1/largest_decrease"
+    kind: ChartEventKind
+    series: str | None = None     # "Italy"
+    point: int                    # index of the point the event lands on
+    ref: str | None = None        # its source cell, "I2"
+    category: str                 # "Aug"
+    value: float                  # 62000.0
+    display: str                  # "€62,000"
+
+    # Rises and falls only: the point before, and the move between the two.
+    from_point: int | None = None
+    from_category: str | None = None
+    from_value: float | None = None
+    from_display: str | None = None
+    change: float | None = None       # -92000.0
+    pct_change: float | None = None   # -0.597; None when the move starts from zero
+
+    tied_with: list[str] = Field(default_factory=list)  # other categories with the same extreme
+    signal: Signal                # the cue: type "trend" (pattern cue), severity "low"
+    explanation: str              # the "Why?" sentence, facts only
+
+
 class Chart(BaseModel):
     """A chart embedded in the worksheet. The demo cut reads one line chart."""
 
@@ -85,6 +118,7 @@ class Chart(BaseModel):
     y_title: str | None = None
     anchor: str | None = None     # "B12:J27": the cells the chart sits over
     series: list[ChartSeries] = Field(default_factory=list)
+    events: list[ChartEvent] = Field(default_factory=list)
 
 
 class SheetModel(BaseModel):
