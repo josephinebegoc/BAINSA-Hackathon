@@ -12,54 +12,65 @@
   p, li { margin: .3em 0; }
   ul { margin: .2em 0; padding-left: 1.1em; }
   code { font-family: "SF Mono", Menlo, monospace; font-size: 9pt; background: #f2f2f2; padding: 0 .2em; }
-  .note { border-left: 2px solid #1f3864; padding-left: .7em; margin: .5em 0; }
+  table { border-collapse: collapse; margin: .35em 0; font-size: 9pt; }
+  td, th { border: 1px solid #ccc; padding: .15em .45em; text-align: left; vertical-align: top; }
   @media screen { body { margin: 2rem auto; padding: 0 1rem; } }
 </style>
 </head>
 <body>
 
 <h1>Accessible Attention for Excel — Technical Overview</h1>
-<p class="sub">Static frontend and one Python serverless function on Vercel. No database, no build step, no framework.</p>
+<p class="sub">Static frontend plus one Python serverless function, deployed on Vercel.</p>
 
-<h2>Pipeline</h2>
-<p>An uploaded <code>.xlsx</code> is read by openpyxl twice — once for formulas, once for the values Excel last
-calculated — and becomes a <strong>SheetModel</strong>: every cell with its value <em>and</em> its visual vocabulary
-(fill, font colour, bold, italic, borders, comments, number format, errors). A deterministic engine annotates cells
-with cues; the browser holds the model and does all narration, so the server is stateless.</p>
+<h2>Architecture</h2>
+<p>Frontend: plain ES modules, no framework or build step. Backend: one FastAPI function exposing
+<code>/api/health</code>, <code>/api/upload</code> (multipart <code>.xlsx</code>), <code>/api/explain</code> and
+<code>/api/overview</code>. No database, no server state — the browser holds the parsed workbook and sends the
+context each call needs. Dependencies: FastAPI, openpyxl, python-multipart, anthropic.</p>
 
-<h2>The attention engine is our own code, not a model</h2>
-<p>478 lines of pure functions, no I/O. Four cue types: <strong>author visual</strong> (fill, font colour, bold, or
-a column formatted unlike its neighbours), <strong>statistical</strong> (robust z-score on median/MAD),
-<strong>pattern</strong> (three or more consecutive moves reversed by over 25%) and <strong>functional</strong>
-(Excel errors). Two decisions were forced by real files:</p>
-<ul>
-  <li><strong>Comparability by scale, not formatting.</strong> Real sheets are formatted inconsistently — our demo
-  workbook has one revenue column set to percent and four left as General. Grouping by number format tore a
-  twelve-month series into three. We group columns by the scale of their medians, so a mis-formatted revenue figure
-  is still revenue-sized.</li>
-  <li><strong>A minimum effect size on the z-score.</strong> A tightly-clustered series has a near-zero MAD, so the
-  z-score explodes on noise — it flagged a cell 13% from its median. Distance-from-median alone fails the other
-  way: a row that changes level partway through has <em>both</em> ends far from it.</li>
-</ul>
+<h2>Extraction</h2>
+<p>openpyxl opens the workbook twice — <code>data_only=False</code> for formulas, <code>True</code> for cached
+values and error codes. Each cell keeps its value, formatted display, fill and font colour, bold/italic/underline,
+borders, comment, number format and error. Header row and label column are inferred; the table is cropped at the
+first blank row; unresolvable theme colours are recorded as present-but-unnamed rather than guessed.</p>
+
+<h2>Attention engine</h2>
+<p><code>attention.py</code>: 478 lines of pure functions, no I/O.</p>
+<table>
+<tr><th>Cue</th><th>Rule</th></tr>
+<tr><td>visual</td><td>Non-default fill; red or orange font; bold where the row is not; or a column whose number
+format differs in kind from its series.</td></tr>
+<tr><td>anomaly</td><td><code>0.6745·|x−median|/MAD &gt; 3.5</code> <em>and</em> ≥15% from the median. Where
+<code>MAD/|median| &lt; 0.01</code> the z-score is meaningless and &gt;40% distance is used instead. Series under
+4 numbers are skipped.</td></tr>
+<tr><td>trend</td><td>≥3 consecutive moves one way, then a reversal exceeding 25%.</td></tr>
+<tr><td>error</td><td>Cached Excel error value.</td></tr>
+</table>
+<p>Columns are grouped for comparison by the order of magnitude of their medians (within 100×), judged per column
+across the sheet so one outlier cannot form a group alone. Number format is deliberately not used: the demo
+workbook has one revenue column formatted as a percentage and four as General, which would split a twelve-month
+series into three.</p>
 
 <h2>Sonification</h2>
-<p>A row plays as tones. Pitch carries two things: the row's median fixes its register, so rows are comparable by
-ear, and the row's own range is expanded around it, so a row sitting low still has an audible shape. Frequency is
-exponential in value, so equal steps sound like equal intervals; amplitude falls ~3&nbsp;dB per octave to offset
-equal-loudness curves, so only pitch changes and a low note never reads as faint.</p>
+<p>Web Audio. The main series fixes one pitch scale, mapping its 5th–95th percentile onto 110–1760 Hz with
+outliers clamped. A row's median sets a register within that scale; the row's own min–max is stretched across 34%
+of the range around it. Frequency is exponential in value, so equal steps give equal intervals. Amplitude follows
+<code>(110/f)<sup>0.5</sup></code> (≈ −3 dB per octave) to offset equal-loudness curves. Notes are 400 ms, panned
+left to right; errors are a square wave, empty cells silent.</p>
 
-<h2>The LLM is one component, not the product</h2>
-<p class="note">Every spoken sentence has a deterministic template. The Anthropic API only rephrases, and its output
-is rejected if it contains a judgement word or a number not supplied in the input. <strong>The deployed demo runs
-with no API key</strong> — all detection and all wording is ours.</p>
+<h2>Language model use</h2>
+<p>Every spoken string comes from a deterministic template. The Anthropic API only rephrases them, under a 5 s
+timeout; its output is discarded if it contains a blocklisted judgement word, markdown, or any digit sequence
+absent from the input facts. Without an API key the templates are used directly, which is how the deployed demo
+runs.</p>
 
-<h2>Accessibility and reproducibility</h2>
-<p>Two output modes: self-voicing via <code>speechSynthesis</code>, and a screen-reader mode writing to
-<code>aria-live</code> regions so VoiceOver and NVDA speak it. One earcon for all cue types, with the cue name
-spoken <em>before</em> the cell so a listener knows to attend before the content arrives. Grid at
-<code>role="application"</code>; markers carry letters as well as colour; Atkinson Hyperlegible throughout.
+<h2>Accessibility and tests</h2>
+<p><code>speechSynthesis</code> (cancelled before each utterance) and <code>aria-live</code> regions (polite for
+movement, assertive for cues) for VoiceOver and NVDA. Grid at <code>role="application"</code> so arrow keys pass
+through browse mode. One earcon for all cue types, played before speech, cue name spoken first;
+<code>navigator.vibrate</code> feature-detected; markers carry a letter as well as a colour; Atkinson Hyperlegible.
 82 Python tests and 27 JavaScript assertions, including a regression test that the engine independently reproduces
-the shared fixture's cues, and tests that every failure path returns a speakable sentence.</p>
+the shared fixture's cues.</p>
 
 </body>
 </html>
