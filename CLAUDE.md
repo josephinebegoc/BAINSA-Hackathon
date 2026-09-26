@@ -390,6 +390,7 @@ the same file.**
 |---|---|---|
 | **Margaux** (repo + Vercel owner) | Backend, data and the attention engine | everything under `api/`, plus `tests/`, `scripts/`, `public/demo/`, `public/fixtures/`, `vercel.json`, `requirements.txt`, `.gitignore` |
 | **Josephine** | Browser, interaction and output | everything else under `public/`: `index.html`, `app.js`, `styles.css`, `voice.js`, `cues.js` |
+| **Design** (two people) | Visual design | `public/styles.css` and any new CSS files, **on the `design` branch only** |
 
 All of `public/` except `demo/` and `fixtures/` is Josephine's, because `app.js`
 calls `voice.announce()` and `cues.play()` on nearly every keystroke — splitting
@@ -404,9 +405,42 @@ demo file without waiting for the interface.
 
 Ask me who I am at the start of a session if you don't know. Only edit files I own unless I explicitly say otherwise. If a change is needed in someone else's file, tell me what to ask them for.
 
+### Design works on the `design` branch
+
+The two designers work on `design`, never on `main`. **Josephine reviews and merges
+their work into her half**, because the markup and the CSS are joined at the hip and
+she is the one who knows which parts the JS and the screen readers depend on.
+
+Designers: propose markup changes, don't make them. Ask Josephine for the class or
+the wrapper you need.
+
+#### Design guardrails — non-negotiable
+
+Every one of these can be broken with no visible symptom. The page looks better and
+the product silently stops working for the people it is for.
+
+1. **Never hide the live regions with `display: none` or `visibility: hidden`.**
+   `#live-polite` and `#live-assertive` must stay in the accessibility tree or screen
+   readers announce nothing at all. Hide them with the clip pattern
+   (`position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%)`).
+2. **Never write `outline: none`.** The focus ring is how a keyboard user knows where
+   they are. Restyle it if you like, but it stays strongly visible and at least 3:1
+   against what is next to it.
+3. **Colour is never the only clue.** The signal markers carry a letter as well as a
+   colour on purpose. Replacing them with coloured dots reintroduces the exact
+   problem this product exists to solve.
+4. **Do not touch element IDs, ARIA attributes, `role="application"`, or the DOM
+   structure `app.js` queries.** It looks elements up by ID; restructuring breaks
+   navigation with no error in the console.
+5. **Contrast:** 4.5:1 for body text, 3:1 for large text and for the edges of any
+   control. Low-vision users are half the people in this track.
+6. **Works at 400px wide and at 200% zoom.** The demo runs on a phone.
+7. **Respect `prefers-reduced-motion`.** No animation that cannot be turned off.
+8. **Nothing may be hover-only.** The grid is driven by keyboard and by touch.
+
 ### Each of us works on our own branch
 
-Branches: `Margaux` and `josephine` (note the capital M on one and not the other).
+Branches: `Margaux`, `josephine`, and `design` (note the capital M on one and not the others).
 `main` must always work.
 
 Do not create a branch whose name starts with an existing branch name — `Margaux`
