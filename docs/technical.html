@@ -20,58 +20,68 @@
 <body>
 
 <h1>Accessible Attention for Excel — Technical Overview</h1>
-<p class="sub">Static frontend plus one Python serverless function, deployed on Vercel.</p>
+<p class="sub">A static frontend and one Python serverless function, deployed on Vercel.</p>
 
 <h2>Architecture</h2>
-<p>Frontend: plain ES modules, no framework or build step. Backend: one FastAPI function exposing
-<code>/api/health</code>, <code>/api/upload</code> (multipart <code>.xlsx</code>), <code>/api/explain</code> and
-<code>/api/overview</code>. No database, no server state — the browser holds the parsed workbook and sends the
-context each call needs. Dependencies: FastAPI, openpyxl, python-multipart, anthropic.</p>
+<p>The frontend is a set of ES modules served as static files: <code>app.js</code> (grid, navigation, modes),
+<code>voice.js</code> (speech), <code>cues.js</code> (earcons and vibration) and <code>sonify.js</code> (tones).
+The backend is a single FastAPI function providing <code>/api/health</code>, <code>/api/upload</code> (multipart
+<code>.xlsx</code>), <code>/api/explain</code> and <code>/api/overview</code>. The browser holds the parsed
+workbook and passes the context each call needs, so every request is independent. Dependencies: FastAPI, openpyxl,
+python-multipart, anthropic.</p>
 
 <h2>Extraction</h2>
-<p>openpyxl opens the workbook twice — <code>data_only=False</code> for formulas, <code>True</code> for cached
-values and error codes. Each cell keeps its value, formatted display, fill and font colour, bold/italic/underline,
-borders, comment, number format and error. Header row and label column are inferred; the table is cropped at the
-first blank row; unresolvable theme colours are recorded as present-but-unnamed rather than guessed.</p>
+<p>openpyxl opens the workbook twice: <code>data_only=False</code> yields formulas, <code>data_only=True</code>
+yields the values and error codes Excel last calculated. Each cell carries its value, formatted display, row label,
+column header, fill and font colour, bold, italic, underline, strikethrough, borders, comment, number format and
+error code. The header row is the first row that is mostly text, the label column the first mostly-text column
+below it, and the table extends to the first blank row. Theme and indexed colours are resolved to a name where
+possible and otherwise marked as present.</p>
 
 <h2>Attention engine</h2>
-<p><code>attention.py</code>: 478 lines of pure functions, no I/O.</p>
+<p><code>attention.py</code> is 478 lines of pure functions that take cells and return cues.</p>
 <table>
 <tr><th>Cue</th><th>Rule</th></tr>
-<tr><td>visual</td><td>Non-default fill; red or orange font; bold where the row is not; or a column whose number
+<tr><td>visual</td><td>A solid fill, a red or orange font, bold against an unbolded row, or a column whose number
 format differs in kind from its series.</td></tr>
-<tr><td>anomaly</td><td><code>0.6745·|x−median|/MAD &gt; 3.5</code> <em>and</em> ≥15% from the median. Where
-<code>MAD/|median| &lt; 0.01</code> the z-score is meaningless and &gt;40% distance is used instead. Series under
-4 numbers are skipped.</td></tr>
-<tr><td>trend</td><td>≥3 consecutive moves one way, then a reversal exceeding 25%.</td></tr>
-<tr><td>error</td><td>Cached Excel error value.</td></tr>
+<tr><td>anomaly</td><td><code>0.6745·|x−median|/MAD &gt; 3.5</code> together with a distance of 15% or more from
+the median. Where <code>MAD/|median| &lt; 0.01</code>, a distance above 40% is used. Series of four or more
+numbers qualify.</td></tr>
+<tr><td>trend</td><td>Three or more consecutive moves in one direction followed by a reversal above 25%.</td></tr>
+<tr><td>error</td><td>A cached Excel error value.</td></tr>
 </table>
-<p>Columns are grouped for comparison by the order of magnitude of their medians (within 100×), judged per column
-across the sheet so one outlier cannot form a group alone. Number format is deliberately not used: the demo
-workbook has one revenue column formatted as a percentage and four as General, which would split a twelve-month
-series into three.</p>
+<p>Cells are compared within groups of columns holding the same kind of quantity. Columns join a group while the
+order of magnitude of their medians falls within 100× of each other, measured per column across the whole sheet.
+Groups of four or more columns are analysed. Cues carry a severity and are ordered by severity, then by reading
+order.</p>
 
 <h2>Sonification</h2>
-<p>Web Audio. The main series fixes one pitch scale, mapping its 5th–95th percentile onto 110–1760 Hz with
-outliers clamped. A row's median sets a register within that scale; the row's own min–max is stretched across 34%
-of the range around it. Frequency is exponential in value, so equal steps give equal intervals. Amplitude follows
-<code>(110/f)<sup>0.5</sup></code> (≈ −3 dB per octave) to offset equal-loudness curves. Notes are 400 ms, panned
-left to right; errors are a square wave, empty cells silent.</p>
+<p><code>sonify.js</code> uses the Web Audio API. The sheet's main column group fixes one pitch scale, mapping its
+5th to 95th percentile onto 110–1760 Hz and clamping values beyond it. Within that scale a row's median sets its
+register, and the row's own minimum to maximum is stretched across 34% of the range around that register.
+Frequency rises exponentially with value, so equal steps in the data produce equal musical intervals. Amplitude
+follows <code>(110/f)<sup>0.5</sup></code>, about −3 dB per octave, matching equal-loudness curves so that
+perceived volume stays constant. Notes last 400 ms with a 70 ms gap and pan from left to right. Error cells sound
+a square wave at 110 Hz; empty cells are silent.</p>
 
-<h2>Language model use</h2>
-<p>Spoken text is generated from deterministic templates built from the engine's findings, and the Anthropic API
-rephrases them into natural speech under a 5 s timeout. Model output is validated before use: it is rejected in
-favour of the template if it contains a blocklisted judgement word, markdown, or any digit sequence absent from the
-input facts, so no spoken sentence can assert a number or an opinion the engine did not produce. Every call has a
-template path, so speech degrades rather than fails.</p>
+<h2>Spoken text</h2>
+<p>The engine's findings are rendered into sentences by templates in <code>overview.py</code> and
+<code>explain.py</code>. The Anthropic API then rephrases those sentences into natural speech within a 5 s
+timeout. Its output is checked against the input facts and accepted when it contains only supplied figures, plain
+prose and no evaluative language; the template is used otherwise.</p>
 
-<h2>Accessibility and tests</h2>
-<p><code>speechSynthesis</code> (cancelled before each utterance) and <code>aria-live</code> regions (polite for
-movement, assertive for cues) for VoiceOver and NVDA. Grid at <code>role="application"</code> so arrow keys pass
-through browse mode. One earcon for all cue types, played before speech, cue name spoken first;
-<code>navigator.vibrate</code> feature-detected; markers carry a letter as well as a colour; Atkinson Hyperlegible.
-82 Python tests and 27 JavaScript assertions, including a regression test that the engine independently reproduces
-the shared fixture's cues.</p>
+<h2>Accessibility</h2>
+<p>Speech reaches the user by two paths: <code>speechSynthesis</code>, cancelled before each utterance so
+announcements track navigation, and <code>aria-live</code> regions (polite for movement, assertive for cues) read
+by VoiceOver and NVDA. The grid carries <code>role="application"</code> so arrow keys reach it in browse mode. A
+single earcon precedes speech on every flagged cell and the cue name is spoken first.
+<code>navigator.vibrate</code> is feature-detected. Cue markers carry a letter alongside their colour, and the
+interface is set in Atkinson Hyperlegible.</p>
+
+<h2>Tests</h2>
+<p>82 Python tests and 27 JavaScript assertions cover the cue rules, extraction, the API's failure paths and the
+pitch mapping, including a regression test that the engine reproduces the shared fixture's cues and ordering from
+the cells alone.</p>
 
 </body>
 </html>
