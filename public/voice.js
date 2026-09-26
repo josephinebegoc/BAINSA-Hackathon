@@ -18,10 +18,28 @@ const regions = {
 };
 const captionEl = document.getElementById("caption");
 
+// The browser's default voice is often robotic. These name patterns mark the
+// high-quality voices, best first.
+const VOICE_PREFERENCES = [
+  /natural/i, // Edge: "Microsoft Aria Online (Natural)"
+  /premium/i, // Apple voices downloaded in System Settings: "Ava (Premium)"
+  /enhanced/i, // Apple: "Samantha (Enhanced)"
+  /neural/i,
+  /^Google (UK|US) English/i, // Chrome's online voices
+];
+
 const settings = {
   mode: synth ? "self" : "sr", // no speech support: fall back to the screen reader
   rate: loadRate(),
+  voice: null, // a SpeechSynthesisVoice, or null for the browser default
+  voiceWanted: "", // name asked for with setVoice(), if any
 };
+
+if (synth) {
+  // Some browsers (Chrome) load their voice list late, so pick again when it arrives.
+  synth.addEventListener?.("voiceschanged", pickVoice);
+  pickVoice();
+}
 let pending = null; // speech waiting for an earcon to finish
 
 // delay: ms to wait before speaking, so a cue's sound plays first.
@@ -68,6 +86,39 @@ export function getRate() {
   return settings.rate;
 }
 
+// Ask for a voice by (part of) its name, e.g. "Ava" or "Google UK".
+export function setVoice(name) {
+  settings.voiceWanted = name || "";
+  pickVoice();
+}
+
+export function getVoiceName() {
+  return settings.voice?.name || "browser default";
+}
+
+function pickVoice() {
+  const voices = synth.getVoices().filter((v) => v.lang?.toLowerCase().startsWith("en"));
+  if (!voices.length) return; // not loaded yet: voiceschanged will call us again
+
+  const wanted = settings.voiceWanted.toLowerCase();
+  const byName = wanted && voices.find((v) => v.name.toLowerCase().includes(wanted));
+  settings.voice = byName || bestVoice(voices);
+
+  console.info(
+    `[voice] using "${getVoiceName()}". English voices available:`,
+    voices.map((v) => v.name)
+  );
+}
+
+// The first voice matching the earliest preference; otherwise the system default.
+function bestVoice(voices) {
+  for (const pattern of VOICE_PREFERENCES) {
+    const match = voices.find((v) => pattern.test(v.name));
+    if (match) return match;
+  }
+  return voices.find((v) => v.default) || voices[0];
+}
+
 // ---------- Self-voicing ----------
 
 function speak(text) {
@@ -76,7 +127,8 @@ function speak(text) {
   for (const chunk of chunks(text)) {
     const utterance = new SpeechSynthesisUtterance(chunk);
     utterance.rate = settings.rate;
-    utterance.lang = document.documentElement.lang || "en";
+    if (settings.voice) utterance.voice = settings.voice;
+    utterance.lang = settings.voice?.lang || document.documentElement.lang || "en";
     synth.speak(utterance);
   }
 }

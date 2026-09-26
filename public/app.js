@@ -436,10 +436,12 @@ document.getElementById("load-demo").addEventListener("click", () => {
 });
 
 // Test switches until the visible controls exist (Phase 3):
-// ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate.
+// ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate,
+// ?voice=Ava picks a voice by name (the console lists them).
 const params = new URLSearchParams(location.search);
 if (params.has("sr")) voice.setMode("sr");
 if (params.has("rate")) voice.setRate(Number(params.get("rate")));
+if (params.has("voice")) voice.setVoice(params.get("voice"));
 
 if (params.has("fixture")) {
   loadFixture();
