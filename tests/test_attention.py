@@ -67,17 +67,18 @@ def test_anomaly_handles_negatives():
 
 # --- trend -------------------------------------------------------------------
 
-def test_trend_flags_a_reversal_after_a_run():
+def test_trend_reports_the_shape_not_a_verdict():
+    """Facts only: the size of the move and the run before it, never a judgement."""
     cells = row([100, 110, 120, 135, 145, 80])
     found = attention.trend_signals(cells)
     assert list(found) == ["G2"]
-    assert found["G2"].detail == "Breaks a run of 4 increases"
+    assert found["G2"].detail == "Falls 45% after 4 rises"
 
 
 def test_trend_uses_the_callers_word_for_a_step():
     cells = row([100, 110, 120, 135, 145, 80])
     found = attention.trend_signals(cells, step_word="month")
-    assert found["G2"].detail == "Breaks a 4-month upward trend"
+    assert found["G2"].detail == "Falls 45% after 4 months of rises"
 
 
 def test_trend_ignores_a_short_run():
@@ -93,9 +94,9 @@ def test_trend_ignores_a_small_dip():
 def test_trend_catches_a_downward_run_reversing_up():
     cells = row([200, 180, 160, 140, 130, 400])
     found = attention.trend_signals(cells)
-    assert found and "decreases" in next(iter(found.values())).detail
+    assert found and "after 4 falls" in next(iter(found.values())).detail
     with_word = attention.trend_signals(cells, step_word="month")
-    assert "downward" in next(iter(with_word.values())).detail
+    assert "after 4 months of falls" in next(iter(with_word.values())).detail
 
 
 # --- visual ------------------------------------------------------------------

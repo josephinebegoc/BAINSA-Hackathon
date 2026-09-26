@@ -184,8 +184,12 @@ def trend_signals(series: list[Cell], step_word: str | None = None) -> dict[str,
                 break
 
         if run >= TREND_MIN_RUN:
-            detail = (f"Breaks a {run}-{step_word} {word} trend" if step_word
-                      else f"Breaks a run of {run} {'increases' if direction == 1 else 'decreases'}")
+            # State the shape and the size of the reversal, and stop there. Calling
+            # it a worrying drop would be us analysing on the user's behalf.
+            verb = "Falls" if direction == 1 else "Rises"
+            ran = "rises" if direction == 1 else "falls"
+            span = f"{run} {step_word}s of" if step_word else f"{run}"
+            detail = f"{verb} {round(abs(move) * 100)}% after {span} {ran}"
             found[series[i].ref] = Signal(type="trend", severity="medium", detail=detail)
     return found
 
