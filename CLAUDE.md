@@ -61,8 +61,16 @@ vercel.json
 `vercel.json` rewrites every `/api/*` path to the one FastAPI function:
 
 ```json
-{ "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index" }] }
+{ "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index?__path=$1" }] }
 ```
+
+**The original path does not survive the rewrite.** Vercel hands the function
+`/api/index` no matter what the browser asked for, and sends no header carrying
+the real path, so routes declared as `/api/health` return a FastAPI 404. That is
+why the rewrite passes the path along as `?__path=` and a small ASGI middleware in
+`api/index.py` (`RestoreApiPath`) puts it back before routing. Verified on the live
+deployment. Declare routes as the plain URL the browser calls (`/api/health`) and
+this stays invisible; don't "simplify" the rewrite back.
 
 ## API — stateless (serverless)
 
@@ -83,9 +91,9 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
 {
   "id": "abc123",
   "title": "Sales Performance 2026",
-  "n_rows": 9, "n_cols": 13,
+  "n_rows": 9, "n_cols": 14,
   "header_row": 1, "label_col": 1,
-  "col_headers": ["Country", "Jan", "Feb", "..."],
+  "col_headers": ["Country", "Jan", "Feb", "...", "Dec", "Growth %"],
   "row_labels": ["France", "Italy", "..."],
   "overview": "This sheet contains monthly revenue for eight countries...",
   "cells": [
@@ -119,13 +127,20 @@ Pure functions with no I/O, fully unit-tested. Four signal types:
 | Type | Rule (prototype) | Example detail |
 |---|---|---|
 | `visual` | non-default solid fill, or red/orange font; bold only if the rest of the row isn't bold | "Author highlighted this cell in red" |
-| `anomaly` | within its row series (numeric cells in the same row), robust z-score using median/MAD > 3.5, **or** more than 40% away from the row median. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
+| `anomaly` | within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median, **or** more than 40% away from the row median regardless of z. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
 | `trend` | at least 3 consecutive increases (or decreases) followed by a move in the opposite direction larger than 25% | "Breaks a 4-month upward trend" |
 | `error` | cell holds an Excel error value | "Formula error: division by zero" |
 
 - Severity: `error` is always high; `visual` is high; `anomaly`/`trend` are medium, or high if both hit the same cell.
 - `attention_order`: sort by severity, then reading order (row, col).
 - Name colours in plain words (red, orange, yellow, green, blue, grey) by nearest hue. Never read hex codes aloud.
+- **The 15% floor on the z-score is not optional.** A series with tight noise has a
+  tiny MAD, which makes the robust z-score explode on trivial variation: without the
+  floor the demo sheet flags an ordinary cell sitting 13% above its row median.
+- **A "row series" is the comparable numeric cells only, not every number in the row.**
+  Skip columns in other units — percentages, ratios, totals. Comparing a `Growth %`
+  of 0.04 against monthly revenues around 80,000 makes every percentage look like an
+  extreme anomaly. Easiest test: skip percent-formatted columns.
 - Also run the series logic column-wise when the sheet is clearly column-oriented (row labels are time periods). Default is row-wise.
 
 ## Overview (overview.py): ORIENT
@@ -195,7 +210,7 @@ Copy the recalculated file to `public/demo/sales_demo.xlsx` and commit it. Libre
 
 ### Phase 0: Skeleton + contract (Margaux only, before anyone else codes)
 1. Skeleton: `api/index.py` with `/api/health`, `vercel.json`, `requirements.txt`, `.gitignore`, `public/index.html` saying hello. Deploy to Vercel and confirm `/api/health` works on the live URL.
-2. **The contract:** `api/_lib/models.py` (pydantic SheetModel) **and** a hand-written `public/fixtures/sample_sheet.json`: a small 8×12 sales sheet in the exact SheetModel shape, including the four planted signals. This fixture lets everyone build in parallel without waiting for each other.
+2. **The contract:** `api/_lib/models.py` (pydantic SheetModel) **and** a hand-written `public/fixtures/sample_sheet.json`: a 9×14 sales sheet in the exact SheetModel shape (header row + 8 countries; label column + 12 months + a `Growth %` column for the `#DIV/0!` to live in), including the four planted signals. This fixture lets everyone build in parallel without waiting for each other.
 3. Push. Everyone else clones only after this push.
 
 ### Phase 1: Build in parallel (each person, own files only, against the fixture)
