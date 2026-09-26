@@ -90,12 +90,15 @@
         <button type="button" id="next-signal" class="button-primary" aria-keyshortcuts="Space">
           Next attention signal <span aria-hidden="true">→</span> <kbd>Space</kbd>
         </button>
+        <button type="button" id="stop-speaking" aria-keyshortcuts="S Escape">
+          Stop speaking <kbd>S</kbd>
+        </button>
       </div>
 
       <div id="grid"
            role="application"
            tabindex="0"
-           aria-label="Spreadsheet. Use the arrow keys to move between cells. Press Space for the first flagged cell, N for the next one, and H for help.">
+           aria-label="Spreadsheet. Use the arrow keys to move between cells. Press Space for the next flagged cell, S to stop speaking, and H for help.">
       </div>
 
       <!-- The selected cell, for sighted viewers. Screen readers hear it as
@@ -129,7 +132,7 @@
         <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column (as tones in Sound Graph)</li>
         <li><kbd>1</kbd> Explore · <kbd>2</kbd> Concise · <kbd>3</kbd> Sound Graph</li>
         <li><kbd>F</kbd> change which cues you hear (all, author, data, errors)</li>
-        <li><kbd>Esc</kbd> stop speaking</li>
+        <li><kbd>S</kbd> or <kbd>Esc</kbd> stop speaking</li>
         <li><kbd>H</kbd> hear these shortcuts</li>
       </ul>
     </details>

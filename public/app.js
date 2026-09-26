@@ -45,7 +45,7 @@ const WELCOME =
   "Welcome. Press L to open the demo sheet, or U to upload your own spreadsheet. " +
   "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
-const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "1", "2", "3", "Escape"]);
+const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "s", "1", "2", "3", "Escape"]);
 // Vercel rejects bodies over about 4.5 MB before the server sees them, so we
 // check first and say so, rather than failing with no explanation.
 const MAX_UPLOAD_BYTES = 4_000_000;
@@ -57,7 +57,7 @@ const HELP_TEXT =
   "R reads the whole row, C the whole column. " +
   "1 is Explore mode, 2 is Concise mode, 3 is Sound Graph. " +
   "F changes which cues you hear. " +
-  "L loads the demo sheet. U uploads your own spreadsheet. Escape stops speaking.";
+  "L loads the demo sheet. U uploads your own spreadsheet. S or Escape stops speaking.";
 
 // ---------- Modes and filters (see CLAUDE.md, "Modes and commands") ----------
 // A mode changes how moving is narrated; it stays until changed.
@@ -986,11 +986,15 @@ const KEY_ACTIONS = {
   r: () => (state.mode === "scan" ? playTones("row") : readRow()),
   c: () => (state.mode === "scan" ? playTones("column") : readColumn()),
   h: () => voice.announce(HELP_TEXT),
-  Escape: () => {
-    voice.stop();
-    sonify?.stop?.();
-  },
+  s: stopSpeaking,
+  Escape: stopSpeaking,
 };
+
+// S, Escape or the Stop speaking button: silence the voice and any tones.
+function stopSpeaking() {
+  voice.stop();
+  sonify?.stop?.();
+}
 
 gridEl.addEventListener("keydown", (event) => {
   // Leave browser shortcuts like Cmd+R alone.
@@ -1101,6 +1105,11 @@ for (const button of document.querySelectorAll("button.filter")) {
     gridEl.focus();
   });
 }
+
+document.getElementById("stop-speaking").addEventListener("click", () => {
+  stopSpeaking();
+  gridEl.focus(); // back to the grid, so the arrow keys keep working
+});
 
 document.getElementById("next-signal").addEventListener("click", () => {
   cues.unlock();
