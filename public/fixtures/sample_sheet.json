@@ -32,6 +32,20 @@
     "Sweden"
   ],
   "value_label": "sales",
+  "series_cols": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
   "overview": "Sales Performance 2026. Sales. 8 rows by 14 columns, from Country to Growth %. Typical values are €62,800 under Jan and €72,000 under Dec. 4 cells flagged: 1 author visual cue, 1 statistical cue, 1 pattern cue and 1 functional cue. Press N to go to the first.",
   "cells": [
     {

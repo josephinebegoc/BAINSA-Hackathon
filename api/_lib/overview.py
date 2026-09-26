@@ -43,23 +43,11 @@ def _typical(model: SheetModel, col: int) -> str:
     return min(values, key=lambda pair: abs(pair[0] - median))[1]
 
 
-def _main_series_columns(model: SheetModel) -> list[int]:
-    """The biggest group of columns holding the same kind of quantity.
-
-    The overview must not report a range that runs from euros to a growth ratio, so
-    it uses the same like-with-like grouping the attention engine does.
-    """
-    body = [c for c in model.cells
-            if c.row != model.header_row and c.col != model.label_col]
-    groups = attention.comparable_axes(body, "col")
-    if not groups:
-        return [c for c in range(1, model.n_cols + 1) if c != model.label_col]
-    return sorted(max(groups, key=len))
-
-
 def facts_for(model: SheetModel) -> OverviewFacts:
     """Measure the sheet. No opinions."""
-    series = [c for c in _main_series_columns(model) if _typical(model, c)]
+    columns = model.series_cols or attention.main_series_columns(
+        model.cells, model.header_row, model.label_col)
+    series = [c for c in columns if _typical(model, c)]
     first_col = series[0] if series else None
     last_col = series[-1] if len(series) > 1 else None
 

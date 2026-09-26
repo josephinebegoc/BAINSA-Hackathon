@@ -366,3 +366,98 @@ def test_format_kind_names_what_a_reader_sees():
     assert attention.format_kind('"€"#,##0') == "currency"
     assert attention.format_kind("General") == "a plain number"
     assert attention.format_kind(None) == "a plain number"
+
+
+# --- the sheet's main series, for one pitch scale ----------------------------
+
+def test_main_series_columns_excludes_a_different_quantity():
+    """Trend Scan needs one scale for the sheet. A growth ratio must not set it."""
+    cells = sheet_with_growth_column(lambda g: f"{g}")
+    cells += [Cell(ref=f"{chr(64 + c)}1", row=1, col=c, value=f"H{c}", bold=True)
+              for c in range(1, 7)]
+    assert attention.main_series_columns(cells, header_row=1, label_col=1) == [2, 3, 4, 5]
+
+
+def test_main_series_columns_survives_a_sheet_with_no_numbers():
+    cells = [Cell(ref="A1", row=1, col=1, value="hello", display="hello")]
+    assert attention.main_series_columns(cells) == []
+
+
+# --- which way the series run ------------------------------------------------
+
+def sheet(rows):
+    """Cells for a small sheet: first row headers, first column labels."""
+    cells = []
+    for r, values in enumerate(rows, start=1):
+        for c, v in enumerate(values, start=1):
+            number = isinstance(v, (int, float))
+            cells.append(Cell(
+                ref=f"{chr(64 + c)}{r}", row=r, col=c, value=v,
+                display=f"{v:,}" if number else str(v),
+                row_label=str(values[0]) if r > 1 else None,
+                col_header=str(rows[0][c - 1]) if c > 1 else None,
+            ))
+    return cells
+
+
+def flagged(cells):
+    orientation = attention.choose_orientation(cells)
+    found = attention.find_signals(cells, orientation=orientation)
+    return orientation, {ref for ref, sigs in found.items() if any(s.type == "anomaly" for s in sigs)}
+
+
+def test_a_plain_list_is_read_down_the_column():
+    # Name | Amount: one number per row, so the row alone can say nothing.
+    cells = sheet([["Name", "Amount"], ["Anna", 120], ["Ben", 135], ["Chloe", 128],
+                   ["David", 9500], ["Emma", 131], ["Farid", 126]])
+    assert flagged(cells) == ("col", {"B5"})
+
+
+def test_months_down_the_page_are_read_down_each_column():
+    cells = sheet([["Month", "Shop A", "Shop B", "Shop C"],
+                   ["Jan", 100, 210, 300], ["Feb", 104, 205, 310], ["Mar", 98, 9000, 305],
+                   ["Apr", 102, 212, 298], ["May", 101, 208, 302], ["Jun", 99, 211, 307]])
+    assert flagged(cells) == ("col", {"C4"})
+
+
+def test_months_across_the_page_stay_row_wise():
+    cells = sheet([["Country", "Jan", "Feb", "Mar", "Apr", "May"],
+                   ["Italy", 100, 104, 98, 102, 400], ["France", 200, 205, 198, 202, 201]])
+    assert flagged(cells) == ("row", {"F2"})
+
+
+def test_time_word_needs_whole_labels():
+    assert attention.time_word(["Jan", "Feb", "Mar", "Apr"]) == "month"
+    assert attention.time_word(["Q1", "Q2", "Q3", "Q4"]) == "quarter"
+    assert attention.time_word(["2021", "2022", "2023"]) == "year"
+    assert attention.time_word(["Marketing", "Sales", "Support", "Mayfair"]) is None
+
+
+def test_a_single_huge_value_in_a_list_is_not_dropped_with_its_row():
+    # Order ID | Quantity | Order value: two numbers a row. The huge value must
+    # not make its own row look like "another kind of quantity" and vanish.
+    rows = [["Order", "Quantity", "Value"]]
+    values = [971, 3914, 281, 615, 664, 2916, 386, 302, 12, 934, 363, 104, 552, 561]
+    for i, v in enumerate(values):
+        rows.append([f"O{i}", 100 + i, v])
+    rows.insert(6, ["O-big", 130, 100_000_000_000])
+    orientation, refs = flagged(sheet(rows))
+    assert orientation == "col"
+    assert "C7" in refs
+
+
+def test_lopsided_values_flag_the_extreme_not_the_merely_large():
+    # Order values: mostly hundreds, some legitimately in the thousands.
+    values = [50, 80, 120, 200, 300, 450, 700, 1000, 1500, 2500, 4000, 100_000_000]
+    rows = [["Order", "Value"]] + [[f"O{i}", v] for i, v in enumerate(values)]
+    found = attention.find_signals(sheet(rows), orientation="col")
+    refs = {ref for ref, sigs in found.items() if any(s.type == "anomaly" for s in sigs)}
+    assert refs == {"B13"}
+    assert "times the median for Value" in found["B13"][0].detail
+
+
+def test_no_trends_down_a_list_that_is_not_time():
+    rows = [["Order", "Value"]] + [[f"O{i}", v] for i, v in
+                                   enumerate([100, 120, 140, 160, 20, 110, 130, 90])]
+    found = attention.find_signals(sheet(rows), orientation="col")
+    assert not any(s.type == "trend" for sigs in found.values() for s in sigs)

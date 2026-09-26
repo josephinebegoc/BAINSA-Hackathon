@@ -112,10 +112,21 @@ async def upload(file: UploadFile = File(...)):
         return _spoken_error("That sheet appears to be empty.")
 
     try:
+        # Which way to compare: along each row (usual), or down each column when
+        # the rows are the periods or each row holds a single number.
+        orientation = attention.choose_orientation(
+            model.cells, model.header_row, model.label_col
+        )
+        if orientation == "col":
+            # Down the page, one step is one row: "month" when the rows are months.
+            step_word = attention.time_word(
+                [c.display for c in model.cells if c.col == model.label_col]
+            )
         model.attention_order = attention.apply_signals(
             model.cells,
             header_row=model.header_row,
             label_col=model.label_col,
+            orientation=orientation,
             step_word=step_word,
         )
     except Exception:
@@ -129,6 +140,12 @@ async def upload(file: UploadFile = File(...)):
         model.attention_items = chart_attention.attention_items(model)
     except Exception:
         model.attention_items = []
+
+    try:
+        model.series_cols = attention.main_series_columns(
+            model.cells, model.header_row, model.label_col)
+    except Exception:
+        model.series_cols = []
 
     try:
         model.overview = overview_for(model)

@@ -160,6 +160,13 @@ class SheetModel(BaseModel):
     # guessing would be us inventing meaning the author never wrote down.
     value_label: str = ""
 
+    # The columns holding the sheet's main quantity, as 1-based indexes. Trend Scan
+    # needs one pitch scale for the whole sheet, and that scale has to come from
+    # comparable values only: include a growth ratio of 0.8 among revenue figures in
+    # the hundreds of thousands and the bottom of the scale lands on the ratio, so
+    # every revenue row plays as a single high note.
+    series_cols: list[int] = Field(default_factory=list)
+
     overview: str                 # ORIENT text, template version
 
     cells: list[Cell]

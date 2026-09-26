@@ -194,6 +194,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
   "col_headers": ["Country", "Jan", "Feb", "...", "Dec", "Growth %"],
   "row_labels": ["France", "Italy", "..."],
   "value_label": "sales",
+  "series_cols": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
   "overview": "This sheet contains monthly revenue for eight countries...",
   "cells": [
     {
@@ -270,6 +271,41 @@ Optional LLM polish: send only the facts JSON, ask for 2 sentences maximum and n
 - Upload button, "Load demo" button, mode toggle, and a visible grid (so sighted judges can follow along).
 - The focused cell has a strong visible outline. Flagged cells show a small corner marker by type.
 
+### Modes and commands
+
+A **mode** is a persistent state that changes how movement is narrated. A **command**
+is a one-shot utterance that changes nothing. Overview and "describe this cell" are
+commands, not modes -- there is nothing to leave.
+
+| Mode | Key | What moving sounds like |
+|---|---|---|
+| **Explore** (default) | `1` | Full context: row, column, value, and the cue name first when flagged. Includes position in the run -- "month 8 of 12". |
+| **Concise** | `2` | The value alone, so twelve months can be crossed quickly. Cues still interrupt. |
+| **Trend Scan** | `3` | No speech for ordinary numeric cells. `R` plays the current row as tones, `C` the current column. |
+
+| Command | Key |
+|---|---|
+| Overview | `O` |
+| Why is this flagged | `W` or `?` |
+| Describe how this cell looks | `D` |
+| Next / previous flagged cell | `Space` / `Shift+Space`, `N` / `Shift+N` |
+| Cycle attention filter | `F` |
+| Help | `H` |
+| Stop speech | `Esc` |
+
+**Never bind `Cmd`+digit or `Ctrl+Space`.** Cmd+1 to Cmd+4 switch browser tabs on a
+Mac and the page never receives them; Ctrl+Space belongs to macOS input switching.
+Plain digits for modes, `Enter` or `.` if a repeat key is ever needed.
+
+### Attention filters
+
+`F` cycles ALL → AUTHOR → DATA (statistical + pattern) → ERRORS, announcing the
+active filter and how many signals it leaves: "Author only. Three signals."
+
+**A filter scopes navigation as well as interruptions.** If someone selects AUTHOR and
+presses `Space`, jumping them to a statistical cue makes the filter a lie. It applies
+to `attention_order` and to the cues together, or it is not a filter.
+
 ### Keyboard (primary)
 | Key | Action |
 |---|---|
@@ -277,7 +313,10 @@ Optional LLM polish: send only the facts JSON, ask for 2 sentences maximum and n
 | `O` | speak the overview (ORIENT) |
 | `N` / `Shift+N` | jump to next / previous important cell (NOTICE) |
 | `W` or `?` | explain the current cell (UNDERSTAND) |
-| `R` / `C` | read the whole current row / column header context |
+| `R` / `C` | read the whole current row / column context -- **as tones in Trend Scan** |
+| `D` | describe how the current cell looks |
+| `F` | cycle the attention filter |
+| `1` / `2` / `3` | Explore / Concise / Trend Scan |
 | `Esc` | stop speech |
 
 Put the grid container at `role="application"` with an `aria-label` and a clear instruction, so screen readers in browse mode pass the arrow keys through.
@@ -289,6 +328,81 @@ Put the grid container at `role="application"` with an `aria-label` and a clear 
 ### Output: two modes
 1. **Self-voicing (default for the demo):** `speechSynthesis`. Always `cancel()` the previous utterance before speaking so speech never queues behind navigation. Speaking rate is adjustable.
 2. **Screen-reader mode:** no self-voicing. Write announcements to an `aria-live="polite"` region (use `assertive` only for attention cues) so VoiceOver or NVDA speaks them. This proves the tool works *with* existing assistive tech rather than replacing it.
+
+### Trend Scan (sonify.js): perceiving shape
+
+A row of twelve numbers becomes twelve short tones in about two seconds, so a
+listener hears the shape of a year instead of counting twelve figures. No screen
+reader does this, and it is the clearest demonstration of the whole idea.
+
+**The contract.** `public/sonify.js` is Margaux's; `app.js` calls it and nothing else
+touches it:
+
+```js
+// Once per sheet: every value from the columns SheetModel.series_cols names.
+// Fixes the pitch scale for the whole sheet, so rows can be compared by ear.
+export function setScale(allValues)
+
+// The line to speak before the tones: "Italy, January to December. €62,000 to €154,000."
+export function describe({ values, label, unit })
+
+// Play one row or column as tones. Returns how long it will take in ms, so speech
+// can wait for it the way cues.play() already does.
+export function playSeries({ values, label, unit }, { onDone } = {})
+
+export function stop()                 // Escape
+export function unlock()               // call from a click or key press, like cues.unlock()
+export function isSupported()          // false without Web Audio; app.js falls back to Concise
+export function hasScale()             // false until setScale() has been given values
+```
+
+**sonify.js makes no speech of its own.** `app.js` announces `describe(series)` through
+`voice.js`, then calls `playSeries()` — voice belongs to `voice.js`, and the caller
+owns the timing.
+
+Entries in `values` are numbers, `null` for an empty cell, or the error code as a
+string (`"#DIV/0!"`) for an error cell, which gets its own rough low buzz.
+
+`SheetModel.series_cols` names the columns holding the sheet's main quantity, so the
+frontend never has to work out which values are comparable -- that logic lives in
+`attention.main_series_columns()` and belongs in one place.
+
+- `values` — the numbers in order, `null` for empty cells
+- `label` — `"Italy, January to December"`, spoken before the tones
+- `unit` — `"€"`, so the spoken scale line reads `€62,000 to €154,000`
+
+**Normalising: across the sheet, never per row.** The point of Trend Scan is comparing
+rows by ear -- play Italy, then play Germany, and hear which is larger. Stretching each
+row to fill the pitch range on its own destroys exactly that: a small country and a
+large one both span two octaves and sound the same height. Pitch must mean the same
+thing every time it is heard, or rows cannot be compared at all.
+
+So the scale is fixed for the whole sheet, taken from the main comparable column group
+(the same grouping the attention engine uses, so a growth ratio never sets the scale
+for revenue):
+
+- Map the **5th to 95th percentile** of all values in that group onto the pitch range,
+  and clamp anything outside to the top or bottom note. A single outlier -- Germany's
+  390,000 -- would otherwise squash every other row into the bottom of the range.
+- A flat row therefore sounds flat, and a row sitting low sounds low. That is correct:
+  it is the information.
+- The spoken line before the tones still names **that row's own** minimum and maximum,
+  so the listener gets its absolute magnitude as well as its position in the sheet.
+
+**What makes it sound like information rather than noise:**
+
+- **Logarithmic pitch, not linear Hz.** Human pitch perception is logarithmic; a linear
+  mapping makes every high value sound alike. Roughly 220 Hz to 880 Hz, two octaves.
+- **Do not snap to a musical scale.** Quantising sounds prettier and can flatten the
+  exact cliff you are trying to hear.
+- **About 150 ms per note**, so twelve months lands near two seconds — one shape, not a list.
+- **Pan left to right** across the series: pitch carries the value, stereo carries position.
+- **Speak the scale once, before the tones:** "Italy, January to December. €62,000 to
+  €154,000." Pitch is relative, so without this a listener cannot tell €154,000 from €154.
+- **Errors get a clearly different sound; empty cells are silent.** Silence reads as a gap.
+
+Pitch-based output does not work for everyone — hearing loss and amusia are both
+common — so it is a mode you opt into and Explore always remains.
 
 ### Cues (cues.js): NOTICE
 - Normal cell: a very short, quiet tick (Web Audio, about 30 ms).
@@ -389,7 +503,7 @@ the same file.**
 
 | Person | Half | Owns |
 |---|---|---|
-| **Margaux** (repo + Vercel owner) | Backend, data and the attention engine | everything under `api/`, plus `tests/`, `scripts/`, `public/demo/`, `public/fixtures/`, `vercel.json`, `requirements.txt`, `.gitignore` |
+| **Margaux** (repo + Vercel owner) | Backend, data, the attention engine, and Trend Scan | everything under `api/`, plus `tests/`, `scripts/`, `public/demo/`, `public/fixtures/`, `public/sonify.js`, `vercel.json`, `requirements.txt`, `.gitignore` |
 | **Josephine** | Browser, interaction and output | everything else under `public/`: `index.html`, `app.js`, `styles.css`, `voice.js`, `cues.js` |
 | **Design** (two people) | Visual design | `public/styles.css` and any new CSS files, **on the `design` branch only** |
 
