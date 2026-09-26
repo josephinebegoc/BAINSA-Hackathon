@@ -90,26 +90,27 @@ def main(path: str) -> None:
                 detail = next(s.detail for s in found[ref] if s.type == "anomaly")
                 print(f"    {ref}  {c.row_label} / {c.col_header}  {c.display}  -- {detail}")
 
-    # Columns formatted unlike their neighbours: visible to a sighted user,
-    # currently silent to a listener.
+    # Columns formatted unlike their neighbours. The engine flags these now, so
+    # only mention the ones it somehow missed.
     body = [c for c in model.cells
             if c.row != model.header_row and c.col != model.label_col]
+    flagged_cols = {c.col for c in model.cells
+                    if c.row == model.header_row and c.signals}
     for group in attention.comparable_axes(body, "col"):
         formats = Counter(c.number_format for c in body
                           if c.col in group and c.number_format)
-        if len(formats) > 1:
+        if len(formats) > 1 and not (group & flagged_cols):
             usual, _ = formats.most_common(1)[0]
             odd = sorted({c.col for c in body
                           if c.col in group and c.number_format not in (usual, None)})
             if odd:
                 said_something = True
                 print(f"\n  Columns formatted unlike the rest of their series "
-                      f"(most are {usual!r}):")
+                      f"(most are {usual!r}) and NOT flagged:")
                 for col in odd:
                     sample = next(c for c in body if c.col == col)
-                    print(f"    {model.col_headers[col - 1]:<16} {sample.number_format!r:<12} "
-                          f"shows as {sample.display!r}")
-                print("    -> a sighted reader sees this instantly. We say nothing.")
+                    print(f"    {model.col_headers[col - 1]:<16} "
+                          f"{sample.number_format!r:<12} shows as {sample.display!r}")
 
     if not said_something:
         print("  nothing")

@@ -257,6 +257,82 @@ def trend_signals(series: list[Cell], step_word: str | None = None) -> dict[str,
     return found
 
 
+def format_kind(number_format: str | None) -> str:
+    """What a number format makes a value look like: a percentage, money, or a number."""
+    fmt = (number_format or "").lower()
+    if "%" in fmt:
+        return "a percentage"
+    if any(symbol in fmt for symbol in ("€", "$", "£", "¥")):
+        return "currency"
+    return "a plain number"
+
+
+def formatting_signals(
+    cells: list[Cell], header_row: int, label_col: int
+) -> dict[str, Signal]:
+    """Columns formatted unlike the rest of their series, keyed by header cell ref.
+
+    This is author visual semantics at its most literal. A column of revenue left
+    formatted as a percentage renders as "6,900,000.0%" next to "€112,000": a sighted
+    reader sees it instantly and a screen reader says nothing about it at all.
+
+    The cue goes on the column's header cell, once, rather than on every cell in the
+    column -- the oddity is a property of the column, and flagging forty cells would
+    bury everything else.
+    """
+    body = [c for c in cells if c.row != header_row and c.col != label_col]
+    headers = {c.col: c for c in cells if c.row == header_row}
+    found: dict[str, Signal] = {}
+
+    for group in comparable_axes(body, "col"):
+        kinds: dict[int, str] = {}
+        sample: dict[int, Cell] = {}
+        for cell in body:
+            if cell.col in group and _numeric(cell) and cell.number_format:
+                kinds.setdefault(cell.col, format_kind(cell.number_format))
+                sample.setdefault(cell.col, cell)
+
+        if len(set(kinds.values())) < 2:
+            continue
+
+        usual = Counter(kinds.values()).most_common(1)[0][0]
+        odd = sorted(col for col, kind in kinds.items()
+                     if kind != usual and col in headers)
+
+        # Neighbouring columns with the same oddity are one thing a reader notices,
+        # not three. Saying it three times buries the rest of the sheet.
+        for run in _runs(odd, kinds):
+            first, last = run[0], run[-1]
+            kind = kinds[first]
+            # A percentage among currency changes the number you read, not just the
+            # symbol in front of it, so it is the louder of the two.
+            severity: Severity = ("high" if "percentage" in f"{kind} {usual}"
+                                  else "medium")
+            where = ("This column is" if first == last else
+                     f"{_header_text(headers, first)} to {_header_text(headers, last)} are")
+            detail = (f"{where} formatted as {kind} while the others show {usual}. "
+                      f"Values here read as {sample[first].display}")
+            found[headers[first].ref] = Signal(type="visual", severity=severity,
+                                               detail=detail)
+    return found
+
+
+def _header_text(headers: dict[int, Cell], col: int) -> str:
+    cell = headers.get(col)
+    return str(cell.display or cell.value or f"column {col}") if cell else f"column {col}"
+
+
+def _runs(columns: list[int], kinds: dict[int, str]) -> list[list[int]]:
+    """Split columns into neighbouring stretches that share the same oddity."""
+    runs: list[list[int]] = []
+    for col in columns:
+        if runs and col == runs[-1][-1] + 1 and kinds[col] == kinds[runs[-1][-1]]:
+            runs[-1].append(col)
+        else:
+            runs.append([col])
+    return runs
+
+
 def visual_signal(cell: Cell, line: list[Cell]) -> Signal | None:
     """The author drew attention to this cell by hand."""
     if cell.fill:
@@ -310,6 +386,11 @@ def find_signals(
     """
     body = [c for c in cells if c.row != header_row and c.col != label_col]
     found: dict[str, list[Signal]] = defaultdict(list)
+
+    # Columns formatted unlike their neighbours. The cue lands on the header cell,
+    # which is otherwise skipped, so this runs before the body is filtered out.
+    for ref, signal in formatting_signals(cells, header_row, label_col).items():
+        found[ref].append(signal)
 
     # Signals that depend only on the cell, or on its row's formatting.
     by_row: dict[int, list[Cell]] = defaultdict(list)

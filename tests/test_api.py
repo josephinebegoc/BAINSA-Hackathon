@@ -48,19 +48,37 @@ def test_upload_returns_a_usable_sheet_model(client):
 def test_upload_finds_the_planted_cues(client):
     """All four the author's own Team Guide lists: F5, D4, I2 and N6."""
     body = upload(client).json()
-    assert set(body["attention_order"]) == {"F5", "D4", "I2", "N6"}
     kinds = {c["ref"]: {s["type"] for s in c["signals"]}
              for c in body["cells"] if c["signals"]}
+    assert {"F5", "D4", "I2", "N6"} <= set(body["attention_order"])
     assert kinds["F5"] == {"visual"}
     assert kinds["D4"] == {"anomaly"}
     assert kinds["I2"] == {"trend"}
     assert kinds["N6"] == {"error"}
 
 
+def test_upload_flags_the_oddly_formatted_columns(client):
+    """Sep renders as 6,900,000.0% next to €112,000. A sighted reader sees that."""
+    body = upload(client).json()
+    by_ref = {c["ref"]: c for c in body["cells"]}
+    sep = by_ref["J1"]["signals"]
+    assert sep and sep[0]["type"] == "visual" and sep[0]["severity"] == "high"
+    assert "percentage" in sep[0]["detail"]
+    assert "6,900,000.0%" in sep[0]["detail"]
+
+
+def test_neighbouring_columns_with_the_same_oddity_are_one_cue(client):
+    """Oct, Nov and Dec share a problem. Saying it three times buries everything."""
+    body = upload(client).json()
+    by_ref = {c["ref"]: c for c in body["cells"]}
+    assert "Oct to Dec" in by_ref["K1"]["signals"][0]["detail"]
+    assert not by_ref["L1"]["signals"] and not by_ref["M1"]["signals"]
+
+
 def test_upload_speaks_an_overview_without_an_llm(client):
     body = upload(client).json()
     assert body["overview"].startswith("European Sales 2026.")
-    assert "4 cells flagged" in body["overview"]
+    assert "6 cells flagged" in body["overview"]
 
 
 def test_upload_reads_the_value_label_from_the_sheet(client):

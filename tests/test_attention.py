@@ -313,3 +313,56 @@ def test_value_label_prefers_the_title_over_a_column_header():
 def test_value_label_falls_back_to_headers():
     from _lib.extract import _value_label
     assert _value_label("Sheet1", ["Country", "Hours", "Jan"]) == "hours"
+
+
+# --- columns formatted unlike their neighbours -------------------------------
+
+def formatted_sheet(formats):
+    """A header row plus four rows of numbers, each column formatted as given."""
+    cells = [Cell(ref=f"{chr(65 + i)}1", row=1, col=i + 1,
+                  value=f"C{i}", display=f"C{i}", bold=True)
+             for i in range(len(formats) + 1)]
+    for r in range(2, 6):
+        cells.append(Cell(ref=f"A{r}", row=r, col=1, value=f"row{r}", display=f"row{r}"))
+        for i, fmt in enumerate(formats):
+            col = i + 2
+            value = 100_000 + i * 1_000 + r
+            shown = (f"{value / 100:,.1f}%" if "%" in fmt
+                     else f"€{value:,}" if "€" in fmt else f"{value:,}")
+            cells.append(Cell(ref=f"{chr(64 + col)}{r}", row=r, col=col, value=value,
+                              display=shown, number_format=fmt, row_label=f"row{r}",
+                              col_header=f"C{i}"))
+    return cells
+
+
+def test_a_percentage_column_among_currency_is_flagged_loudly():
+    cells = formatted_sheet(['€#,##0', '€#,##0', '0.0%', '€#,##0'])
+    found = attention.formatting_signals(cells, header_row=1, label_col=1)
+    assert list(found) == ["D1"]
+    assert found["D1"].severity == "high"
+    assert "percentage" in found["D1"].detail
+
+
+def test_a_missing_currency_symbol_is_flagged_quietly():
+    cells = formatted_sheet(['€#,##0', '€#,##0', '€#,##0', 'General'])
+    found = attention.formatting_signals(cells, header_row=1, label_col=1)
+    assert found["E1"].severity == "medium"
+
+
+def test_consistent_formatting_produces_no_cue():
+    cells = formatted_sheet(['€#,##0'] * 4)
+    assert attention.formatting_signals(cells, header_row=1, label_col=1) == {}
+
+
+def test_neighbouring_odd_columns_collapse_into_one_cue():
+    cells = formatted_sheet(['€#,##0', '€#,##0', 'General', 'General'])
+    found = attention.formatting_signals(cells, header_row=1, label_col=1)
+    assert len(found) == 1
+    assert " to " in next(iter(found.values())).detail
+
+
+def test_format_kind_names_what_a_reader_sees():
+    assert attention.format_kind("0.0%") == "a percentage"
+    assert attention.format_kind('"€"#,##0') == "currency"
+    assert attention.format_kind("General") == "a plain number"
+    assert attention.format_kind(None) == "a plain number"
