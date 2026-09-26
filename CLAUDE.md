@@ -213,11 +213,27 @@ Copy the recalculated file to `public/demo/sales_demo.xlsx` and commit it. Libre
 2. **The contract:** `api/_lib/models.py` (pydantic SheetModel) **and** a hand-written `public/fixtures/sample_sheet.json`: a 9×14 sales sheet in the exact SheetModel shape (header row + 8 countries; label column + 12 months + a `Growth %` column for the `#DIV/0!` to live in), including the four planted signals. This fixture lets everyone build in parallel without waiting for each other.
 3. Push. Everyone else clones only after this push.
 
-### Phase 1: Build in parallel (each person, own files only, against the fixture)
-- **Engine:** `extract.py` + `attention.py` + tests. Done when: the real demo file produces a SheetModel matching the fixture's shape, with all four signals detected and nothing else flagged high.
-- **Screen:** grid rendering from the fixture (`?fixture=1` loads `public/fixtures/sample_sheet.json`), keyboard navigation, focus outline, signal markers, `N`/`Shift+N`, keyboard help (`H`). Calls `voice.announce(text, {priority})` and `cues.play(type)`; stub these if they're not ready yet.
-- **Voice:** `voice.js` (self-voicing + aria-live modes, cancel-on-move, speaking rate), `cues.js` (four distinct earcons + vibration), then `overview.py` + `explain.py` with templates first and LLM polish second.
-- **Margaux:** `make_demo.py` (recalculated demo file in `public/demo/`), `/api/upload`, `/api/explain`, `/api/overview` in `api/index.py`, env vars on Vercel.
+### Phase 1: Build in parallel (own files only, against the fixture)
+
+**Margaux (backend), in this order:**
+1. `extract.py` — load the workbook twice, openpyxl → SheetModel.
+2. `attention.py` + `tests/test_attention.py` — the four rules, with the corrected anomaly thresholds above.
+3. `POST /api/upload` in `api/index.py`.
+4. `overview.py` + `explain.py`, templates first.
+5. `/api/explain` and `/api/overview`, then LLM polish last.
+
+Done when: the real demo file produces a SheetModel matching the fixture's shape,
+flagging `D5` visual, `F3` anomaly, `G4` trend, `N8` error — and nothing else high.
+
+**Josephine (frontend), in this order:**
+1. Grid rendering from the fixture (`?fixture=1` loads `public/fixtures/sample_sheet.json`), focus outline, signal markers by type.
+2. Keyboard navigation: arrows announce cell + row label + column header + value; `N`/`Shift+N`, `O`, `W`, `R`/`C`, `Esc`, `H` for help. Calls `voice.announce(text, {priority})` and `cues.play(type)` — stub them until step 3.
+3. `voice.js` — self-voicing + aria-live modes, cancel-on-move, speaking rate.
+4. `cues.js` — four distinct earcons + vibration, earcon *before* speech.
+5. The **Start button** that unlocks audio and speaks the overview. Browsers block speech until a real user gesture, so without this the demo is silent.
+
+Done when: the fixture is fully explorable by keyboard, with all four signals
+audible and distinguishable, without the API existing at all.
 
 ### Phase 2: Integration (first end-to-end run)
 - Screen switches "Load demo" from the fixture to `/demo/sales_demo.xlsx` → `/api/upload`.
@@ -252,22 +268,36 @@ Copy the recalculated file to `public/demo/sales_demo.xlsx` and commit it. Libre
 Four of us work on this repo at the same time, each with our own Claude Code. **You (Claude) handle all git for us.** After each git action, say what you did in one plain sentence.
 
 ### Who owns what
-| Role | Person | Owns |
-|---|---|---|
-| Glue (repo + Vercel owner) | Margaux | `api/index.py`, `api/_lib/models.py`, `vercel.json`, `requirements.txt`, `.gitignore`, `scripts/make_demo.py`, `public/demo/`, `public/fixtures/` |
-| Engine | _Name_ | `api/_lib/extract.py`, `api/_lib/attention.py`, `tests/` |
-| Screen | _Name_ | `public/index.html`, `public/app.js`, `public/styles.css` |
-| Voice | _Name_ | `public/voice.js`, `public/cues.js`, `api/_lib/overview.py`, `api/_lib/explain.py` |
+**Two people, split down the Python/browser line so the two branches never touch
+the same file.**
 
-`models.py` and the fixture are the shared contract. Only Margaux changes them, and she tells everyone when she does.
+| Person | Half | Owns |
+|---|---|---|
+| **Margaux** (repo + Vercel owner) | Backend, data and the attention engine | everything under `api/`, plus `tests/`, `scripts/`, `public/demo/`, `public/fixtures/`, `vercel.json`, `requirements.txt`, `.gitignore` |
+| **Josephine** | Browser, interaction and output | everything else under `public/`: `index.html`, `app.js`, `styles.css`, `voice.js`, `cues.js` |
+
+All of `public/` except `demo/` and `fixtures/` is Josephine's, because `app.js`
+calls `voice.announce()` and `cues.play()` on nearly every keystroke — splitting
+that seam across two branches means fighting over it all day.
+
+`api/_lib/models.py` and `public/fixtures/sample_sheet.json` are the shared
+contract. Only Margaux changes them, and she tells Josephine when she does.
+
+Neither half blocks the other: the fixture is committed, so Josephine builds the
+whole interface without waiting for extraction, and Margaux works against the real
+demo file without waiting for the interface.
 
 Ask me who I am at the start of a session if you don't know. Only edit files I own unless I explicitly say otherwise. If a change is needed in someone else's file, tell me what to ask them for.
 
-### Everyone works on `main`, in small steps
-- **When I say "get the latest"** (and always before starting a new task): commit any unsaved work first, then `git pull`.
-- **When I say "save and share"** (or after anything that works): `git add` the relevant files → commit with a short, clear message → `git pull` → `git push`.
-- If `git pull` produces a **merge conflict**: stop. Explain in plain words which file conflicts and what each version does, propose a resolution, and wait for my OK before committing it.
-- Save and share roughly every 30–60 minutes. Small pushes avoid big conflicts.
+### Each of us works on our own branch
+
+Branches: `margaux/backend` and `josephine/frontend`. `main` must always work.
+
+- **When I say "get the latest"** (and always before starting a new task): commit any unsaved work first, then pull `main` into my branch.
+- **When I say "save and share"** (or after anything that works): `git add` the relevant files → commit with a short, clear message → pull `main` into my branch → push my branch.
+- **When I say "merge mine in"**: check my branch actually runs, pull `main`, merge my branch into `main`, push `main`. Only merge working code — `main` is what gets demoed.
+- Pull `main` into my branch every 30–60 minutes even when nothing of mine is ready. Small, frequent merges instead of one painful one at the end.
+- If a pull or merge produces a **merge conflict**: stop. Explain in plain words which file conflicts and what each version does, propose a resolution, and wait for my OK before committing it. With the ownership split above, a conflict outside CLAUDE.md means someone edited the other person's file — say so rather than resolving it quietly.
 
 ### Never
 - `git push --force`, `git reset --hard`, `git rebase`, deleting branches, or rewriting history.
