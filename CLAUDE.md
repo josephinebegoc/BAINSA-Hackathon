@@ -193,6 +193,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
   "header_row": 1, "label_col": 1,
   "col_headers": ["Country", "Jan", "Feb", "...", "Dec", "Growth %"],
   "row_labels": ["France", "Italy", "..."],
+  "value_label": "sales",
   "overview": "This sheet contains monthly revenue for eight countries...",
   "cells": [
     {
@@ -214,6 +215,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
 
 - Load the workbook **twice**: `data_only=False` to get formulas, `data_only=True` to get cached values and errors.
 - **Gotcha:** openpyxl never calculates formulas. A file written by openpyxl has no cached values, so `#DIV/0!` will not appear. The demo file must be recalculated and saved by a spreadsheet app (see Demo data below).
+- `value_label`: what the numbers measure ("revenue", "hours"), for announcements like "Italy. May. Sales. €121,000." **Only ever a word the author actually wrote** in the title or a header — never inferred from the data, the number format or the column names' shape. A sheet that never says what its numbers are gets `""`, and the app stays quiet about it rather than guessing.
 - Header detection (keep it simple): the first non-empty row where most cells are strings is the header row. The first column with mostly strings below it holds the row labels. Use the sheet title, or cell A1 if it is a lone title, as `title`.
 - Capture per cell: value, formatted display (respect the number format where easy, otherwise format numbers sensibly), fill colour (`cell.fill.fgColor.rgb` when `fill_type == "solid"`), font colour, bold, formula, error string (`#DIV/0!`, `#N/A`, `#VALUE!`, `#REF!`, `#NAME?`).
 - **Capture the author's full visual vocabulary even before we announce all of it.**

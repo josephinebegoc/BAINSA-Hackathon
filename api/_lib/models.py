@@ -72,6 +72,11 @@ class SheetModel(BaseModel):
     col_headers: list[str]        # includes the label column's own header
     row_labels: list[str]         # data rows only, in sheet order
 
+    # What the numbers measure ("revenue", "hours"), when the sheet says so
+    # somewhere -- in its title or a header. Empty when it doesn't, because
+    # guessing would be us inventing meaning the author never wrote down.
+    value_label: str = ""
+
     overview: str                 # ORIENT text, template version
 
     cells: list[Cell]

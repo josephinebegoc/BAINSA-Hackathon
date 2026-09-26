@@ -31,6 +31,7 @@
     "Poland",
     "Sweden"
   ],
+  "value_label": "sales",
   "overview": "Sales Performance 2026. 8 rows of countries by 14 columns, from Country to Growth %. Overall, values rise. I found 3 areas that may deserve your attention: 1 highlighted cell, 1 trend change and 1 formula error.",
   "cells": [
     {

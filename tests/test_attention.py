@@ -281,3 +281,37 @@ def test_the_statistical_cue_is_off_by_default():
     assert attention.find_signals(cells) == {}
     louder = attention.find_signals(cells, include_statistical=True)
     assert "E2" in louder and louder["E2"][0].type == "anomaly"
+
+
+# --- value_label: what the numbers measure -----------------------------------
+
+def test_value_label_is_read_from_the_sheet():
+    from _lib.extract import _value_label
+    assert _value_label("European Sales 2026") == "sales"
+    assert _value_label("Monthly Revenue by Country") == "revenue"
+    assert _value_label("Q3 headcount review") == "headcount"
+
+
+def test_value_label_is_empty_when_the_sheet_never_says():
+    """Silence is the correct answer. Guessing would be inventing meaning."""
+    from _lib.extract import _value_label
+    assert _value_label("Sheet1") == ""
+    assert _value_label("Untitled") == ""
+    assert _value_label("") == ""
+    assert _value_label(None) == ""
+
+
+def test_value_label_matches_whole_words_only():
+    from _lib.extract import _value_label
+    assert _value_label("Salesforce export") == ""
+    assert _value_label("Discounted pricing") == ""
+
+
+def test_value_label_prefers_the_title_over_a_column_header():
+    from _lib.extract import _value_label
+    assert _value_label("European Sales 2026", ["Country", "Budget"]) == "sales"
+
+
+def test_value_label_falls_back_to_headers():
+    from _lib.extract import _value_label
+    assert _value_label("Sheet1", ["Country", "Hours", "Jan"]) == "hours"
