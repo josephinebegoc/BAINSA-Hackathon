@@ -74,6 +74,7 @@ button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 }
 
 #status { margin: .75rem 0; }
+#mode-line { margin: 0 0 .75rem; font-weight: 600; color: #333; }
 
 /* Readable by screen readers, invisible on screen. */
 .visually-hidden {
