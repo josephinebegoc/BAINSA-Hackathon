@@ -291,7 +291,12 @@ Ask me who I am at the start of a session if you don't know. Only edit files I o
 
 ### Each of us works on our own branch
 
-Branches: `margaux/backend` and `josephine/frontend`. `main` must always work.
+Branches: `Margaux` and `josephine` (note the capital M on one and not the other).
+`main` must always work.
+
+Do not create a branch whose name starts with an existing branch name — `Margaux`
+and `margaux/anything` cannot coexist, because macOS filesystems are
+case-insensitive and git stores refs as files and directories. It breaks `git fetch`.
 
 - **When I say "get the latest"** (and always before starting a new task): commit any unsaved work first, then pull `main` into my branch.
 - **When I say "save and share"** (or after anything that works): `git add` the relevant files → commit with a short, clear message → pull `main` into my branch → push my branch.
