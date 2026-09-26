@@ -16,6 +16,7 @@ they can be seen, explained and tuned in one place.
 """
 
 import math
+import re
 import statistics
 from collections import Counter, defaultdict
 
@@ -182,35 +183,76 @@ def series_groups(line: list[Cell], keep: set[int] | None = None,
 
 # --- the four rules ----------------------------------------------------------
 
-def anomaly_signals(series: list[Cell], label: str | None) -> dict[str, Signal]:
-    """Cells sitting far from their series median. Keyed by cell ref."""
+def _is_lopsided(values: list[float]) -> bool:
+    """True for quantities that are naturally spread over orders of magnitude.
+
+    Order values, prices, populations: most are small and a few are legitimately
+    ten times larger. The test ignores the extremes on purpose -- the middle 80%
+    alone must span a factor of ten -- so one outlier cannot switch it on.
+    """
+    if len(values) < 10 or min(values) <= 0:
+        return False
+    deciles = statistics.quantiles(values, n=10)
+    return deciles[0] > 0 and deciles[-1] / deciles[0] >= 10
+
+
+def anomaly_signals(series: list[Cell], label: str | None,
+                    axis: str = "col") -> dict[str, Signal]:
+    """Cells sitting far from their series median. Keyed by cell ref.
+
+    `axis` says which way the series runs: "col" along a row (the label is the
+    row's name, "Germany's median"), "row" down a column (the label is a header,
+    "the median for Order value").
+    """
     values = [float(c.value) for c in series]
     if len(values) < MIN_SERIES:
         return {}
 
     median = statistics.median(values)
-    mad = statistics.median([abs(v - median) for v in values])
     denom = abs(median)
-    whose = f"{label}'s" if label else "the"
+    if not label:
+        whose = "the median"
+    elif axis == "col":
+        whose = f"{label}'s median"
+    else:
+        whose = f"the median for {label}"
+
+    # On lopsided quantities every large-but-ordinary value looks extreme on the
+    # raw numbers, so distances are measured on a log scale: "ten times larger"
+    # then counts the same wherever it happens. Demo-style series never qualify.
+    use_log = _is_lopsided(values)
+    scaled = [math.log10(v) for v in values] if use_log else values
+    centre = statistics.median(scaled)
+    mad = statistics.median([abs(v - centre) for v in scaled])
 
     found: dict[str, Signal] = {}
-    for cell in series:
+    for cell, point in zip(series, scaled):
         value = float(cell.value)
-        gap = abs(value - median)
-        pct = gap / denom if denom else 0.0
-        z = 0.6745 * gap / mad if mad else 0.0
+        pct = abs(value - median) / denom if denom else 0.0
+        z = 0.6745 * abs(point - centre) / mad if mad else 0.0
 
-        spread_is_usable = mad > 0 and denom and (mad / denom) > MAD_DEGENERATE
+        if use_log:
+            spread_is_usable = mad > 0
+        else:
+            spread_is_usable = mad > 0 and denom and (mad / denom) > MAD_DEGENERATE
         unusual = ((z > Z_THRESHOLD and pct > Z_MIN_PCT) if spread_is_usable
                    else pct > PCT_THRESHOLD)
         if unusual:
-            side = "below" if value < median else "above"
             found[cell.ref] = Signal(
                 type="anomaly",
                 severity="medium",
-                detail=f"{round(pct * 100)}% {side} {whose} median",
+                detail=_distance_words(value, median, pct, whose),
             )
     return found
+
+
+def _distance_words(value: float, median: float, pct: float, whose: str) -> str:
+    """ "148% above Germany's median", or "74 times the median for Amount" once a
+    percentage stops meaning anything when read aloud."""
+    if median > 0 and value >= 10 * median:
+        return f"{value / median:,.0f} times {whose}"
+    side = "below" if value < median else "above"
+    return f"{round(pct * 100)}% {side} {whose}"
 
 
 def trend_signals(series: list[Cell], step_word: str | None = None) -> dict[str, Signal]:
@@ -333,6 +375,63 @@ def _runs(columns: list[int], kinds: dict[int, str]) -> list[list[int]]:
     return runs
 
 
+# --- which way the series run ------------------------------------------------
+
+_MONTH = re.compile(
+    r"(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|june?|july?|aug(ust)?"
+    r"|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\.?([\s'/-]*\d{2,4})?"
+)
+
+
+def time_word(labels: list[str | None]) -> str | None:
+    """"month", "quarter" or "year" when most of these labels name one, else None.
+
+    Whole-label matches only, so "Marketing" is not March.
+    """
+    present = [(t or "").strip().lower() for t in labels if (t or "").strip()]
+    words = []
+    for text in present:
+        if _MONTH.fullmatch(text):
+            words.append("month")
+        elif re.fullmatch(r"q[1-4](\s+\d{4})?", text):
+            words.append("quarter")
+        elif re.fullmatch(r"(19|20)\d{2}", text):
+            words.append("year")
+    if not words:
+        return None
+    word, count = Counter(words).most_common(1)[0]
+    return word if count >= 3 and count * 2 >= len(present) else None
+
+
+def choose_orientation(cells: list[Cell], header_row: int = 1, label_col: int = 1) -> str:
+    """Which way this sheet's series run: "row" (the default) or "col".
+
+    Comparing each number with the rest of its row is right for the usual layout,
+    one row per thing and one column per period. It finds nothing in two other
+    common layouts, so a very large number goes unmentioned:
+
+    - the rows are the periods (Jan, Feb, ... down the page) and the columns are
+      the things being measured -- the series run down each column;
+    - a plain list, like Name | Amount -- each row holds one number, so there is
+      nothing in the row to compare it with.
+
+    Not "both": reading every sheet both ways compares things that were never meant
+    to be compared, and on the demo flags five ordinary cells.
+    """
+    labels = [c.display for c in cells if c.col == label_col and c.row != header_row]
+    headers = [c.display for c in cells if c.row == header_row and c.col != label_col]
+    if time_word(labels) and not time_word(headers):
+        return "col"
+
+    numbers = [c for c in cells
+               if c.row != header_row and c.col != label_col and _numeric(c) and c.error is None]
+    per_row = Counter(c.row for c in numbers)
+    per_col = Counter(c.col for c in numbers)
+    if per_row and max(per_row.values()) < MIN_SERIES <= max(per_col.values()):
+        return "col"
+    return "row"
+
+
 def main_series_columns(
     cells: list[Cell], header_row: int = 1, label_col: int = 1
 ) -> list[int]:
@@ -419,7 +518,7 @@ def find_signals(
 
     # Series signals. Which lines hold comparable quantities is decided once for the
     # whole sheet, then each row (or column) is read through that lens.
-    plans: list[tuple[list[list[Cell]], str, list[set[int]]]] = []
+    plans: list[tuple[list[list[Cell]], str, list[set[int] | None]]] = []
     if orientation in ("row", "both"):
         rows = [sorted(by_row[r], key=lambda c: c.col) for r in sorted(by_row)]
         plans.append((rows, "col", comparable_axes(body, "col")))
@@ -428,7 +527,14 @@ def find_signals(
         for cell in body:
             by_col[cell.col].append(cell)
         cols = [sorted(by_col[c], key=lambda c: c.row) for c in sorted(by_col)]
-        plans.append((cols, "row", comparable_axes(body, "row")))
+        # Grouping rows by the size of their numbers needs enough numbers per row
+        # to judge that size. In a list (one or two numbers a row) a single huge
+        # value makes its whole row look like another kind of quantity, and the
+        # very value we want to flag is left out. Each column of a list is one
+        # quantity anyway, so every row is kept.
+        per_row = Counter(c.row for c in body if _numeric(c) and c.error is None)
+        rows_are_short = not per_row or max(per_row.values()) < MIN_SERIES
+        plans.append((cols, "row", [None] if rows_are_short else comparable_axes(body, "row")))
 
     for lines, axis, groups in plans:
         for line in lines:
@@ -438,10 +544,14 @@ def find_signals(
             for keep in groups:
                 for series in series_groups(line, keep, axis):
                     if include_statistical:
-                        for ref, signal in anomaly_signals(series, label).items():
+                        for ref, signal in anomaly_signals(series, label, axis).items():
                             found[ref].append(signal)
-                    for ref, signal in trend_signals(series, step_word).items():
-                        found[ref].append(signal)
+                    # Down a column, a "trend" only means something when the rows
+                    # are periods. Down a list of orders it compares one customer
+                    # with the next.
+                    if axis == "col" or step_word:
+                        for ref, signal in trend_signals(series, step_word).items():
+                            found[ref].append(signal)
 
     _escalate(found)
     return dict(found)
