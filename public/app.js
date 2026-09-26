@@ -37,6 +37,15 @@ const ERROR_WORDS = {
   "#NULL!": "Empty intersection",
 };
 
+// Said (or shown) as the page opens, before any key has been pressed.
+const OPENING = "Press any key to start, or L to load the demo.";
+// Said once the first key, click or tap has turned sound on.
+const WELCOME =
+  "Welcome. Press L, or the Load demo button at the top of the page, " +
+  "to open the demo sheet. Press H for help.";
+// Keys that still work before a sheet is open.
+const KEYS_WITHOUT_SHEET = new Set(["l", "h", "Escape"]);
+
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
   "Space goes to the first flagged cell. " +
@@ -693,12 +702,16 @@ const KEY_ACTIONS = {
 
 gridEl.addEventListener("keydown", (event) => {
   // Leave browser shortcuts like Cmd+R alone.
-  if (!state.sheet || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
   cues.unlock();
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const action = KEY_ACTIONS[key];
   if (!action) return;
   event.preventDefault();
+  if (!state.sheet && !KEYS_WITHOUT_SHEET.has(key)) {
+    voice.announce("No sheet is open yet. Press L to load the demo.");
+    return;
+  }
   action(event);
 });
 
@@ -740,14 +753,10 @@ startBtn.addEventListener("click", () => {
   cues.unlock();
   startBtn.hidden = true;
   document.title = "Accessible Attention for Excel";
-  if (state.sheet) {
-    gridEl.focus();
-    voice.announce(orientation());
-    return;
-  }
+  gridEl.focus();
   // Speaking inside the click is what unlocks speech on iPhones and iPads.
-  voice.announce("Opening the demo workbook.");
-  loadDemo();
+  // With ?fixture=1 a sheet is already showing, so give its overview instead.
+  voice.announce(state.sheet ? orientation() : WELCOME);
 });
 
 // Before starting, any key starts: a blind user can't find a button they can't
@@ -763,7 +772,9 @@ document.addEventListener(
     if (NOT_A_START.has(event.key)) return;
     event.preventDefault(); // this key only starts; it doesn't also act on the grid
     event.stopPropagation();
-    startBtn.click();
+    // L goes straight to the demo; any other key starts with the welcome.
+    if (event.key.toLowerCase() === "l") startLoadingDemo();
+    else startBtn.click();
   },
   { capture: true }
 );
@@ -789,4 +800,20 @@ if (params.has("voice")) voice.setVoice(params.get("voice"));
 
 if (params.has("fixture")) {
   loadFixture();
+}
+
+// Tell the user how to begin, every way the browser allows before the first
+// key or tap (after that, sound is unlocked and the welcome takes over):
+// 1. Focus Start, so a screen reader reads its label. The HTML autofocus
+//    attribute is ignored in some cases, e.g. a page opened from another app.
+// 2. A screen-reader alert shortly after load. Live regions are only read when
+//    they change after the page has loaded, hence the delay.
+// 3. Try plain speech too. Most browsers block it until the first key press
+//    and it then fails silently; the big text on the Start screen says the same.
+if (!startBtn.hidden) {
+  startBtn.focus();
+  setTimeout(() => {
+    if (!startBtn.hidden) document.getElementById("live-assertive").textContent = OPENING;
+  }, 1000);
+  if (voice.getMode() === "self") voice.announce(OPENING);
 }
