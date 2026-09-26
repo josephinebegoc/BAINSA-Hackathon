@@ -15,8 +15,9 @@ The thresholds are module constants rather than literals buried in the code, so
 they can be seen, explained and tuned in one place.
 """
 
+import math
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from .models import Cell, Severity, Signal
 
@@ -25,13 +26,22 @@ from .models import Cell, Severity, Signal
 MIN_SERIES = 4          # fewer numbers than this and "unusual" means nothing
 Z_THRESHOLD = 3.5       # robust z-score, median/MAD
 Z_MIN_PCT = 0.15        # ...but also at least this far from the median (see below)
-PCT_THRESHOLD = 0.40    # or simply this far from the median, whatever the z-score
+PCT_THRESHOLD = 0.40    # fallback when the spread is too degenerate for a z-score
 TREND_MIN_RUN = 3       # consecutive moves one way before a reversal counts
 TREND_REVERSAL = 0.25   # and the reversal must be at least this big
+SCALE_SPREAD = 100      # columns within this factor of each other are comparable
 
 # Why Z_MIN_PCT exists: a series with tight noise has a tiny MAD, which makes the
 # robust z-score explode on trivial variation. Without a floor, a cell sitting 13%
 # above its row median gets reported as unusual, which is noise, not attention.
+#
+# Why the distance-from-median rule is only a fallback: a row that changes regime
+# partway through (climbs for seven months, then halves) has its median dragged into
+# the gap between the two levels, so cells at BOTH ends read as far from it. On the
+# real demo file that flagged an ordinary peak sitting at the top of a smooth climb.
+# The z-score does not make that mistake, so it leads; distance only steps in when
+# the spread is too small to compute a meaningful z-score at all.
+MAD_DEGENERATE = 0.01   # MAD this small next to the median means "no real spread"
 
 ERROR_WORDS = {
     "#DIV/0!": "Formula error: division by zero",
@@ -104,20 +114,58 @@ def _numeric(cell: Cell) -> bool:
     return isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool)
 
 
-def series_groups(line: list[Cell]) -> list[list[Cell]]:
-    """Split one row or column into comparable series, longest first.
+def comparable_axes(cells: list[Cell], axis: str = "col") -> list[set[int]]:
+    """Which columns (or rows) hold quantities of the same kind.
 
-    Cells are grouped by unit, and a group is only worth analysing if it has
-    MIN_SERIES numbers in it. A sheet with no number formatting at all produces
-    exactly one group, which is the common case.
+    A "Growth vs Jan" column of 0.8 must never be compared against revenue figures
+    of 130,000, or every growth figure reads as an extreme anomaly. Formatting is
+    the obvious way to tell them apart, but real files are often formatted General
+    with no % sign at all, so we go by scale instead: group by unit first, then keep
+    together only the lines whose medians sit within SCALE_SPREAD of each other.
+
+    Scale is judged per line, across the whole sheet, rather than per cell -- one
+    outlier barely moves its own column's median, so it stays in its group and can
+    still be detected. Bucketing individual values would hide it in a group of one.
     """
-    groups: dict[str, list[Cell]] = defaultdict(list)
-    for cell in line:
+    index = (lambda c: c.col) if axis == "col" else (lambda c: c.row)
+
+    values: dict[int, list[float]] = defaultdict(list)
+    units: dict[int, list[str]] = defaultdict(list)
+    for cell in cells:
         if _numeric(cell) and cell.error is None:
-            groups[unit_of(cell.display)].append(cell)
-    out = [g for g in groups.values() if len(g) >= MIN_SERIES]
-    out.sort(key=len, reverse=True)
-    return out
+            values[index(cell)].append(abs(float(cell.value)))
+            units[index(cell)].append(unit_of(cell.display))
+
+    by_unit: dict[str, list[int]] = defaultdict(list)
+    medians: dict[int, float] = {}
+    for idx, vals in values.items():
+        medians[idx] = statistics.median(vals)
+        by_unit[Counter(units[idx]).most_common(1)[0][0]].append(idx)
+
+    groups: list[set[int]] = []
+    for lines in by_unit.values():
+        scales = [medians[i] for i in lines if medians[i] > 0]
+        if not scales:
+            groups.append(set(lines))
+            continue
+        middle = statistics.median(scales)
+        near = {i for i in lines if medians[i] <= 0
+                or abs(math.log10(medians[i] / middle)) <= math.log10(SCALE_SPREAD)}
+        far = set(lines) - near
+        groups.append(near)
+        if far:
+            groups.append(far)
+    return [g for g in groups if len(g) >= MIN_SERIES]
+
+
+def series_groups(line: list[Cell], keep: set[int] | None = None,
+                  axis: str = "col") -> list[list[Cell]]:
+    """The comparable numeric cells of one row or column, in order."""
+    index = (lambda c: c.col) if axis == "col" else (lambda c: c.row)
+    series = [c for c in line
+              if _numeric(c) and c.error is None and (keep is None or index(c) in keep)]
+    series.sort(key=index)
+    return [series] if len(series) >= MIN_SERIES else []
 
 
 # --- the four rules ----------------------------------------------------------
@@ -140,7 +188,10 @@ def anomaly_signals(series: list[Cell], label: str | None) -> dict[str, Signal]:
         pct = gap / denom if denom else 0.0
         z = 0.6745 * gap / mad if mad else 0.0
 
-        if (z > Z_THRESHOLD and pct > Z_MIN_PCT) or pct > PCT_THRESHOLD:
+        spread_is_usable = mad > 0 and denom and (mad / denom) > MAD_DEGENERATE
+        unusual = ((z > Z_THRESHOLD and pct > Z_MIN_PCT) if spread_is_usable
+                   else pct > PCT_THRESHOLD)
+        if unusual:
             side = "below" if value < median else "above"
             found[cell.ref] = Signal(
                 type="anomaly",
@@ -251,26 +302,30 @@ def find_signals(
             if signal:
                 found[cell.ref].append(signal)
 
-    # Series signals, over whichever lines the caller asked for.
-    lines: list[tuple[list[Cell], str | None]] = []
+    # Series signals. Which lines hold comparable quantities is decided once for the
+    # whole sheet, then each row (or column) is read through that lens.
+    plans: list[tuple[list[list[Cell]], str, list[set[int]]]] = []
     if orientation in ("row", "both"):
-        for row in sorted(by_row):
-            line = sorted(by_row[row], key=lambda c: c.col)
-            lines.append((line, line[0].row_label if line else None))
+        rows = [sorted(by_row[r], key=lambda c: c.col) for r in sorted(by_row)]
+        plans.append((rows, "col", comparable_axes(body, "col")))
     if orientation in ("col", "both"):
         by_col: dict[int, list[Cell]] = defaultdict(list)
         for cell in body:
             by_col[cell.col].append(cell)
-        for col in sorted(by_col):
-            line = sorted(by_col[col], key=lambda c: c.row)
-            lines.append((line, line[0].col_header if line else None))
+        cols = [sorted(by_col[c], key=lambda c: c.row) for c in sorted(by_col)]
+        plans.append((cols, "row", comparable_axes(body, "row")))
 
-    for line, label in lines:
-        for series in series_groups(line):
-            for ref, signal in anomaly_signals(series, label).items():
-                found[ref].append(signal)
-            for ref, signal in trend_signals(series, step_word).items():
-                found[ref].append(signal)
+    for lines, axis, groups in plans:
+        for line in lines:
+            if not line:
+                continue
+            label = line[0].row_label if axis == "col" else line[0].col_header
+            for keep in groups:
+                for series in series_groups(line, keep, axis):
+                    for ref, signal in anomaly_signals(series, label).items():
+                        found[ref].append(signal)
+                    for ref, signal in trend_signals(series, step_word).items():
+                        found[ref].append(signal)
 
     _escalate(found)
     return dict(found)

@@ -160,20 +160,57 @@ def test_unknown_error_code_still_produces_a_signal():
 
 # --- comparing like with like -----------------------------------------------
 
+def sheet_with_growth_column(growth_display):
+    """Four rows of revenue plus a growth column, however it happens to be formatted."""
+    cells = []
+    for i, r in enumerate(range(2, 6)):
+        cells += row([80_000 + i * 900, 82_000, 79_000, 81_000], r=r, label=f"C{r}")
+        g = 0.04 + i / 100
+        cells.append(Cell(ref=f"F{r}", row=r, col=6, value=g,
+                          display=growth_display(g), row_label=f"C{r}",
+                          col_header="Growth"))
+    return cells
+
+
 def test_a_percentage_column_is_not_compared_against_revenue():
-    """The whole point of unit grouping: 0.04 is not an anomaly next to 80,000."""
-    cells = row([80_000, 82_000, 79_000, 81_000])
-    cells.append(Cell(ref="F2", row=2, col=6, value=0.04, display="4.0%",
-                      row_label="Italy", col_header="Growth %"))
-    groups = attention.series_groups(cells)
+    """0.04 is not an anomaly next to 80,000, whatever the formatting says."""
+    cells = sheet_with_growth_column(lambda g: f"{g * 100:.1f}%")
+    groups = attention.comparable_axes(cells, "col")
     assert len(groups) == 1
-    assert [c.ref for c in groups[0]] == ["B2", "C2", "D2", "E2"]
+    assert groups[0] == {2, 3, 4, 5}          # the revenue columns, not column 6
+
+
+def test_scale_splits_columns_even_when_nothing_is_formatted():
+    """The real demo file is formatted General: no % sign to key off, only scale.
+
+    Without this, every growth figure reads as an extreme anomaly against revenue.
+    """
+    cells = sheet_with_growth_column(lambda g: f"{g}")
+    groups = attention.comparable_axes(cells, "col")
+    assert len(groups) == 1
+    assert 6 not in groups[0]
+
+
+def test_an_outlier_stays_inside_its_own_column_group():
+    """A spike must not be bucketed away on its own, or it can never be detected."""
+    cells = []
+    for r in range(2, 7):
+        cells += row([112_000, 118_000, 390_000 if r == 4 else 120_000, 129_000], r=r,
+                     label=f"C{r}")
+    groups = attention.comparable_axes(cells, "col")
+    assert groups and {2, 3, 4, 5} <= groups[0]
 
 
 def test_cells_holding_errors_are_left_out_of_series():
     cells = row([80_000, 82_000, 79_000, 81_000])
     cells.append(Cell(ref="F2", row=2, col=6, error="#DIV/0!", display="#DIV/0!"))
     assert all(c.error is None for c in attention.series_groups(cells)[0])
+
+
+def test_series_groups_respects_the_columns_it_is_given():
+    cells = row([80_000, 82_000, 79_000, 81_000, 0.5])
+    assert [c.ref for c in attention.series_groups(cells, keep={2, 3, 4, 5})[0]] == \
+        ["B2", "C2", "D2", "E2"]
 
 
 def test_text_and_dates_are_not_treated_as_quantities():
