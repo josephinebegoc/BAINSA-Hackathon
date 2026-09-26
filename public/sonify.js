@@ -11,12 +11,23 @@
 
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 
-let LOW_HZ = 220; // two octaves: wide enough to hear differences, never shrill
-let HIGH_HZ = 880;
+// Four octaves. Wide enough that a row's register says something about its size,
+// with room left over for each row's own shape to be heard inside it.
+let LOW_HZ = 110;
+let HIGH_HZ = 1760;
+
+// The fraction of the whole pitch range one row's own variation occupies.
+//
+// This is what lets both things be true at once. A row's median decides where it
+// sits -- a small country sounds lower than a large one, so rows stay comparable --
+// and then its own minimum to maximum is stretched across this much of the range
+// around that point, so a row that is low overall still has an audible shape instead
+// of being a flat drone at the bottom.
+let LOCAL_SPAN = 0.34;
 // 150 ms was too quick to follow: a run of tones blurred into one noise instead of a
 // shape. 280 ms puts twelve months at about 3.4 seconds, still short enough to hold
 // in your head, and leaves a real gap between notes so each pitch is separable.
-let NOTE_MS = 280;
+let NOTE_MS = 400;
 let NOTE_GAP_MS = 70; // silence between notes, so they don't run together
 let GAIN = 0.5; // sine tones are quiet for their amplitude; this is not timid
 const ERROR_HZ = 110; // a rough low buzz, clearly not part of the melody
@@ -27,13 +38,15 @@ let scheduled = []; // live nodes, so stop() can cut them off
 
 // Tuning, so the sound can be adjusted by ear on sonify-test.html rather than
 // through a deploy for every guess. The defaults above are what ships.
-export function configure({ noteMs, gapMs, gain, lowHz, highHz } = {}) {
+export function configure({ noteMs, gapMs, gain, lowHz, highHz, localSpan } = {}) {
   if (noteMs) NOTE_MS = noteMs;
   if (gapMs !== undefined) NOTE_GAP_MS = gapMs;
   if (gain) GAIN = gain;
   if (lowHz) LOW_HZ = lowHz;
   if (highHz) HIGH_HZ = highHz;
-  return { noteMs: NOTE_MS, gapMs: NOTE_GAP_MS, gain: GAIN, lowHz: LOW_HZ, highHz: HIGH_HZ };
+  if (localSpan !== undefined) LOCAL_SPAN = localSpan;
+  return { noteMs: NOTE_MS, gapMs: NOTE_GAP_MS, gain: GAIN,
+           lowHz: LOW_HZ, highHz: HIGH_HZ, localSpan: LOCAL_SPAN };
 }
 
 export function isSupported() {
@@ -83,19 +96,58 @@ export function hasScale() {
   return scale !== null;
 }
 
-// Values outside the scale clamp to the end notes rather than disappearing off it.
+// Where a value sits on the sheet's scale, 0 (lowest) to 1 (highest).
+// Values outside the scale clamp to the ends rather than disappearing off them.
+function sheetPosition(value) {
+  if (!scale) return 0.5;
+  const clamped = Math.min(Math.max(value, scale.low), scale.high);
+  return (clamped - scale.low) / (scale.high - scale.low);
+}
+
+// The pitches for one whole row or column: register from where the row sits on the
+// sheet, shape from the row's own spread around that.
+//
+// Mapping each value straight onto the sheet scale would be honest but unusable -- a
+// row whose values all sit near the bottom would play as a nearly flat drone and its
+// trend would be inaudible, which is the one thing Trend Scan exists to convey.
+export function frequenciesFor(values) {
+  const numbers = values.filter(isNumber);
+  if (!numbers.length) return values.map(() => null);
+
+  const median = [...numbers].sort((a, b) => a - b)[Math.floor(numbers.length / 2)];
+  const low = Math.min(...numbers);
+  const high = Math.max(...numbers);
+  const spread = high - low;
+
+  // Leave room at both ends so an expanded shape never runs off the range.
+  const half = LOCAL_SPAN / 2;
+  const base = half + (1 - LOCAL_SPAN) * sheetPosition(median);
+
+  return values.map((value) => {
+    if (!isNumber(value)) return null;
+    // Where this value sits inside its own row, -0.5 to +0.5. A flat row stays flat.
+    const local = spread ? (value - low) / spread - 0.5 : 0;
+    return pitchAt(base + local * LOCAL_SPAN);
+  });
+}
+
+function pitchAt(position) {
+  const clamped = Math.min(Math.max(position, 0), 1);
+  return LOW_HZ * (HIGH_HZ / LOW_HZ) ** clamped;
+}
+
+// One value on the sheet's scale alone, ignoring any row context.
 // Exported so the pitch mapping can be tested without a browser.
 export function frequencyFor(value) {
   if (!scale) return (LOW_HZ + HIGH_HZ) / 2;
-  const clamped = Math.min(Math.max(value, scale.low), scale.high);
-  const position = (clamped - scale.low) / (scale.high - scale.low);
+  const position = sheetPosition(value);
   // Exponential in frequency = linear in perceived pitch, because hearing is
   // logarithmic: a linear sweep in Hz would make every high value sound alike.
   // Equal steps in value therefore give equal musical intervals, so a steadily
   // rising row sounds like a steadily rising scale. (Mapping equal *ratios* of
   // value to equal intervals instead would make a linear climb sound as though it
   // were slowing down.)
-  return LOW_HZ * (HIGH_HZ / LOW_HZ) ** position;
+  return pitchAt(position);
 }
 
 function isNumber(value) {
@@ -180,6 +232,7 @@ export function playSeries({ values, label, unit } = {}, { onDone } = {}) {
 function schedule(values, onDone) {
   const start = ctx.currentTime + 0.05;
   const last = values.length - 1;
+  const pitches = frequenciesFor(values);
 
   values.forEach((value, index) => {
     const at = start + (index * NOTE_MS) / 1000;
@@ -188,7 +241,7 @@ function schedule(values, onDone) {
     const pan = last === 0 ? 0 : -0.8 + (1.6 * index) / last;
 
     if (isNumber(value)) {
-      note({ at, freq: frequencyFor(value), ms: NOTE_MS - NOTE_GAP_MS, pan });
+      note({ at, freq: pitches[index], ms: NOTE_MS - NOTE_GAP_MS, pan });
     } else if (typeof value === "string" && value.trim()) {
       // An error cell: a rough low buzz nobody mistakes for a pitch.
       note({ at, freq: ERROR_HZ, ms: NOTE_MS - NOTE_GAP_MS, pan, wave: "square", gain: 0.3 });

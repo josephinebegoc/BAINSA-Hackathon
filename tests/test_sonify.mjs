@@ -27,11 +27,11 @@ s.setScale(revenue);
 ok("scale is set", s.hasScale());
 const lowFreq = s.frequencyFor(Math.min(...revenue));
 const highFreq = s.frequencyFor(Math.max(...revenue));
-ok("smallest value sits at the bottom note (220 Hz)", Math.abs(lowFreq - 220) < 1);
-ok("the 390,000 outlier clamps to the top note (880 Hz)", Math.abs(highFreq - 880) < 1);
+ok("smallest value sits at the bottom note (110 Hz)", Math.abs(lowFreq - 110) < 1);
+ok("the 390,000 outlier clamps to the top note (1760 Hz)", Math.abs(highFreq - 1760) < 1);
 
 const mid = s.frequencyFor((Math.min(...revenue) + 230000) / 2);
-ok("a mid value lands between the two", mid > 220 && mid < 880);
+ok("a mid value lands between the two", mid > 110 && mid < 1760);
 
 console.log("\na steady climb sounds like a steady climb:");
 s.setScale([0, 100]);
@@ -41,7 +41,7 @@ const r1 = s.frequencyFor(20) / s.frequencyFor(10);
 const r2 = s.frequencyFor(30) / s.frequencyFor(20);
 const r3 = s.frequencyFor(90) / s.frequencyFor(80);
 ok("equal value steps give equal pitch intervals", Math.abs(r1 - r2) < 1e-9 && Math.abs(r2 - r3) < 1e-9);
-ok("the full range spans exactly two octaves", Math.abs(s.frequencyFor(100) / s.frequencyFor(0) - 4) < 1e-9);
+ok("the full range spans exactly four octaves", Math.abs(s.frequencyFor(100) / s.frequencyFor(0) - 16) < 1e-9);
 
 console.log("\ncomparability: the same value sounds the same in any row");
 s.setScale(revenue);
@@ -49,6 +49,34 @@ const italyAug = s.frequencyFor(120000);
 const germanyAug = s.frequencyFor(120000);
 ok("identical values -> identical pitch", italyAug === germanyAug);
 ok("a bigger value is a higher pitch", s.frequencyFor(200000) > s.frequencyFor(100000));
+
+console.log("\nregister and shape together:");
+{
+  const sheet = [];
+  for (let row = 0; row < 8; row++)
+    for (let m = 0; m < 12; m++) sheet.push(70000 + row * 12000 + m * 6000);
+  s.setScale(sheet);
+
+  const small = [70000, 74000, 78000, 72000, 76000, 80000];
+  const large = [190000, 194000, 198000, 192000, 196000, 200000];
+  const fSmall = s.frequenciesFor(small).filter(Boolean);
+  const fLarge = s.frequenciesFor(large).filter(Boolean);
+  const mid = (f) => Math.sqrt(Math.min(...f) * Math.max(...f));
+  const semitones = (f) => 12 * Math.log2(Math.max(...f) / Math.min(...f));
+
+  ok("a smaller row sits lower overall", mid(fSmall) < mid(fLarge));
+  ok("the small row still has an audible shape (> 6 semitones)", semitones(fSmall) > 6);
+  ok("the large row has an audible shape too", semitones(fLarge) > 6);
+  ok("the two rows are a clear interval apart (> 4 semitones)",
+     12 * Math.log2(mid(fLarge) / mid(fSmall)) > 4);
+
+  const flat = s.frequenciesFor([100000, 100000, 100000, 100000]).filter(Boolean);
+  ok("a flat row stays flat", Math.abs(Math.max(...flat) - Math.min(...flat)) < 1e-6);
+
+  const gappy = s.frequenciesFor([100000, null, 120000]);
+  ok("empty cells stay empty", gappy[1] === null && gappy[0] !== null);
+  ok("a row of nothing does not throw", s.frequenciesFor([null, null]).every((f) => f === null));
+}
 
 console.log("\ndescribe() gives the listener the magnitude:");
 const line = s.describe({ values: [100000, 62000, 154000, null], label: "Italy, January to December", unit: "€" });
