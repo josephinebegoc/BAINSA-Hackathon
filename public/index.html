@@ -18,44 +18,117 @@
     <span class="start-hint">Press any key to start · L loads the demo · U uploads your own</span>
   </button>
 
-  <header>
-    <h1>Accessible Attention for Excel</h1>
-    <p class="tagline">Screen readers make spreadsheet cells readable. We make visual attention accessible.</p>
+  <header class="app-header">
+    <div class="brand">
+      <h1>Accessible Attention</h1>
+      <p class="tagline">Making visual attention accessible.</p>
+    </div>
     <div class="controls">
-      <button type="button" id="load-demo" aria-keyshortcuts="L">Load demo (L)</button>
       <!-- The real file input is hidden; the label after it is the visible
            button. Keyboard and screen-reader users can also press U. -->
       <input type="file" id="file-input" accept=".xlsx,.xlsm" class="visually-hidden"
              aria-label="Upload spreadsheet" aria-keyshortcuts="U">
-      <label class="button" for="file-input">Upload spreadsheet (U)</label>
+      <label class="button button-primary" for="file-input">Upload spreadsheet <kbd>U</kbd></label>
+      <button type="button" id="load-demo" aria-keyshortcuts="L">Load demo <kbd>L</kbd></button>
     </div>
-    <p id="status">Press L for the demo sheet, or U to upload your own spreadsheet.</p>
   </header>
 
   <main>
-    <h2 id="sheet-title" hidden></h2>
-    <div id="grid"
-         role="application"
-         tabindex="0"
-         aria-label="Spreadsheet. Use the arrow keys to move between cells. Press Space for the first flagged cell, N for the next one, and H for help.">
-    </div>
+    <!-- Overview: the open workbook and what was last said. -->
+    <section class="card overview" aria-label="Workbook overview">
+      <p class="eyebrow">Workbook</p>
+      <h2 id="sheet-title" hidden></h2>
+      <p id="sheet-facts" aria-hidden="true"></p>
+      <p id="status">Press L for the demo sheet, or U to upload your own spreadsheet.</p>
+      <p class="eyebrow">Last spoken</p>
+      <!-- Shows the last announcement for sighted viewers. Hidden from screen
+           readers, which hear the same text through the live regions below. -->
+      <p id="caption" aria-hidden="true"></p>
+    </section>
 
-    <!-- Shows the last announcement for sighted viewers. Hidden from screen
-         readers, which hear the same text through the live regions below. -->
-    <p id="caption" aria-hidden="true"></p>
+    <!-- Modes: the same as pressing 1, 2 or 3 on the grid. -->
+    <section class="card modes" aria-labelledby="modes-heading">
+      <h2 id="modes-heading" class="section-heading">Listening mode</h2>
+      <div class="mode-options" role="group" aria-labelledby="modes-heading">
+        <button type="button" class="mode" data-mode="explore" aria-pressed="true" aria-keyshortcuts="1">
+          <span class="mode-top"><kbd>1</kbd> <span class="mode-name">Explore</span></span>
+          <span class="mode-desc">Hear cell context and value</span>
+        </button>
+        <button type="button" class="mode" data-mode="concise" aria-pressed="false" aria-keyshortcuts="2">
+          <span class="mode-top"><kbd>2</kbd> <span class="mode-name">Concise</span></span>
+          <span class="mode-desc">Hear values only</span>
+        </button>
+        <button type="button" class="mode" data-mode="scan" aria-pressed="false" aria-keyshortcuts="3">
+          <span class="mode-top"><kbd>3</kbd> <span class="mode-name">Trend Scan</span></span>
+          <span class="mode-desc">Hear the shape of numerical data</span>
+        </button>
+      </div>
+      <details class="mode-examples">
+        <summary>What does each mode sound like?</summary>
+        <dl>
+          <dt>Explore</dt>
+          <dd>Every cell with its row, column and value: “Italy. August revenue. €62,000.”</dd>
+          <dt>Concise</dt>
+          <dd>Just the values, to move quickly: “€100,000 … €110,000 … €121,000.” Flagged cells still speak.</dd>
+          <dt>Trend Scan</dt>
+          <dd>Ordinary numbers stay silent. Press <kbd>R</kbd> to play the row as tones, <kbd>C</kbd> the column. Higher values produce higher tones.</dd>
+        </dl>
+      </details>
+    </section>
+
+    <!-- Workspace: the spreadsheet and the controls that act on it. -->
+    <section class="card workspace" aria-label="Spreadsheet workspace">
+      <div class="workspace-bar">
+        <div class="filters" role="group" aria-labelledby="filters-label">
+          <span id="filters-label" class="filters-label">Attention</span>
+          <button type="button" class="filter" data-filter="0" aria-pressed="true">All</button>
+          <button type="button" class="filter" data-filter="1" aria-pressed="false">Author</button>
+          <button type="button" class="filter" data-filter="2" aria-pressed="false">Data</button>
+          <button type="button" class="filter" data-filter="3" aria-pressed="false">Errors</button>
+          <span class="key-hint" aria-hidden="true"><kbd>F</kbd> to switch</span>
+        </div>
+        <button type="button" id="next-signal" class="button-primary" aria-keyshortcuts="Space">
+          Next attention signal <span aria-hidden="true">→</span> <kbd>Space</kbd>
+        </button>
+      </div>
+
+      <div id="grid"
+           role="application"
+           tabindex="0"
+           aria-label="Spreadsheet. Use the arrow keys to move between cells. Press Space for the first flagged cell, N for the next one, and H for help.">
+      </div>
+
+      <!-- The selected cell, for sighted viewers. Screen readers hear it as
+           they move, so this is hidden from them like the caption. -->
+      <div class="current-cell" aria-hidden="true">
+        <p class="eyebrow">Current cell</p>
+        <p id="current-cell-text">No cell selected yet.</p>
+        <ul id="current-cell-cues"></ul>
+      </div>
+
+      <ul class="legend" aria-label="What the letters on cells mean">
+        <li><span class="marker marker-visual" aria-hidden="true">V</span> Author</li>
+        <li><span class="marker marker-anomaly" aria-hidden="true">A</span> Anomaly</li>
+        <li><span class="marker marker-trend" aria-hidden="true">T</span> Pattern</li>
+        <li><span class="marker marker-error" aria-hidden="true">E</span> Error</li>
+      </ul>
+
+      <p id="mode-line" aria-hidden="true"></p>
+    </section>
 
     <details id="help">
       <summary>Keyboard shortcuts</summary>
       <ul>
         <li><kbd>Arrow keys</kbd> move one cell</li>
         <li><kbd>O</kbd> overview of the sheet</li>
-        <li><kbd>Space</kbd> first flagged cell</li>
-        <li><kbd>N</kbd> / <kbd>Shift+N</kbd> next / previous flagged cell</li>
+        <li><kbd>Space</kbd> or <kbd>N</kbd> next flagged cell (add <kbd>Shift</kbd> for previous)</li>
         <li><kbd>W</kbd> or <kbd>?</kbd> why was this cell flagged?</li>
         <li><kbd>L</kbd> load the demo sheet</li>
         <li><kbd>U</kbd> upload your own spreadsheet</li>
         <li><kbd>D</kbd> describe everything about this cell</li>
-        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column</li>
+        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column (as tones in Trend Scan)</li>
+        <li><kbd>1</kbd> Explore · <kbd>2</kbd> Concise · <kbd>3</kbd> Trend Scan</li>
+        <li><kbd>F</kbd> change which cues you hear (all, author, data, errors)</li>
         <li><kbd>Esc</kbd> stop speaking</li>
         <li><kbd>H</kbd> hear these shortcuts</li>
       </ul>
