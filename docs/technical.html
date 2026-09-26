@@ -23,20 +23,19 @@
 <p class="sub">A static frontend and one Python serverless function, deployed on Vercel.</p>
 
 <h2>Architecture</h2>
-<p>The frontend is a set of ES modules served as static files: <code>app.js</code> (grid, navigation, modes),
-<code>voice.js</code> (speech), <code>cues.js</code> (earcons and vibration) and <code>sonify.js</code> (tones).
-The backend is a single FastAPI function providing <code>/api/health</code>, <code>/api/upload</code> (multipart
-<code>.xlsx</code>), <code>/api/explain</code> and <code>/api/overview</code>. The browser holds the parsed
-workbook and passes the context each call needs, so every request is independent. Dependencies: FastAPI, openpyxl,
-python-multipart, anthropic.</p>
+<p>The frontend is ES modules served as static files: <code>app.js</code> (grid, navigation, modes),
+<code>voice.js</code>, <code>cues.js</code> and <code>sonify.js</code>. The backend is one FastAPI function
+providing <code>/api/health</code>, <code>/api/upload</code> (multipart <code>.xlsx</code>),
+<code>/api/explain</code> and <code>/api/overview</code>. The browser holds the parsed workbook and passes the
+context each call needs, so every request is independent. Dependencies: FastAPI, openpyxl, python-multipart,
+anthropic.</p>
 
 <h2>Extraction</h2>
 <p>openpyxl opens the workbook twice: <code>data_only=False</code> yields formulas, <code>data_only=True</code>
-yields the values and error codes Excel last calculated. Each cell carries its value, formatted display, row label,
-column header, fill and font colour, bold, italic, underline, strikethrough, borders, comment, number format and
-error code. The header row is the first row that is mostly text, the label column the first mostly-text column
-below it, and the table extends to the first blank row. Theme and indexed colours are resolved to a name where
-possible and otherwise marked as present.</p>
+the values and error codes Excel last calculated. Each cell carries its value, formatted display, row label, column
+header, fill and font colour, bold, italic, underline, borders, comment, number format and error code. The header
+row is the first mostly-text row, the label column the first mostly-text column below it, and the table extends to
+the first blank row.</p>
 
 <h2>Attention engine</h2>
 <p><code>attention.py</code> is 478 lines of pure functions that take cells and return cues.</p>
@@ -50,19 +49,17 @@ numbers qualify.</td></tr>
 <tr><td>trend</td><td>Three or more consecutive moves in one direction followed by a reversal above 25%.</td></tr>
 <tr><td>error</td><td>A cached Excel error value.</td></tr>
 </table>
-<p>Cells are compared within groups of columns holding the same kind of quantity. Columns join a group while the
-order of magnitude of their medians falls within 100× of each other, measured per column across the whole sheet.
-Groups of four or more columns are analysed. Cues carry a severity and are ordered by severity, then by reading
-order.</p>
+<p>Cells are compared within groups of columns holding the same kind of quantity: columns join a group while their
+medians sit within 100× of each other, measured across the whole sheet. Cues carry a severity and are ordered by
+severity, then reading order.</p>
 
 <h2>Sonification</h2>
 <p><code>sonify.js</code> uses the Web Audio API. The sheet's main column group fixes one pitch scale, mapping its
-5th to 95th percentile onto 110–1760 Hz and clamping values beyond it. Within that scale a row's median sets its
-register, and the row's own minimum to maximum is stretched across 34% of the range around that register.
-Frequency rises exponentially with value, so equal steps in the data produce equal musical intervals. Amplitude
-follows <code>(110/f)<sup>0.5</sup></code>, about −3 dB per octave, matching equal-loudness curves so that
-perceived volume stays constant. Notes last 400 ms with a 70 ms gap and pan from left to right. Error cells sound
-a square wave at 110 Hz; empty cells are silent.</p>
+5th to 95th percentile onto 110–1760 Hz and clamping beyond it. Within that scale a row's median sets its register,
+and the row's own minimum to maximum is stretched across 34% of the range around it. Frequency rises exponentially
+with value, so equal steps produce equal musical intervals. Amplitude follows <code>(110/f)<sup>0.5</sup></code>,
+about −3 dB per octave, matching equal-loudness curves so perceived volume stays constant. Notes last 400 ms with
+a 70 ms gap and pan left to right; error cells sound a square wave at 110 Hz.</p>
 
 <h2>Spoken text</h2>
 <p>The engine's findings are rendered into sentences by templates in <code>overview.py</code> and
@@ -73,10 +70,10 @@ prose and no evaluative language; the template is used otherwise.</p>
 <h2>Accessibility</h2>
 <p>Speech reaches the user by two paths: <code>speechSynthesis</code>, cancelled before each utterance so
 announcements track navigation, and <code>aria-live</code> regions (polite for movement, assertive for cues) read
-by VoiceOver and NVDA. The grid carries <code>role="application"</code> so arrow keys reach it in browse mode. A
-single earcon precedes speech on every flagged cell and the cue name is spoken first.
-<code>navigator.vibrate</code> is feature-detected. Cue markers carry a letter alongside their colour, and the
-interface is set in Atkinson Hyperlegible.</p>
+by VoiceOver and NVDA. The grid carries <code>role="application"</code> so arrow keys reach it in browse mode. One
+earcon precedes speech on every flagged cell, with the cue name spoken first. <code>navigator.vibrate</code> is
+feature-detected, cue markers carry a letter alongside their colour, and the interface is set in Atkinson
+Hyperlegible.</p>
 
 <h2>Tests</h2>
 <p>82 Python tests and 27 JavaScript assertions cover the cue rules, extraction, the API's failure paths and the
