@@ -267,6 +267,17 @@ def test_apply_signals_attaches_and_orders():
     cells = row([80_000, 82_000, 79_000, 31_000, 83_000, 81_000])
     cells[1].fill = "FFFF0000"
     order = attention.apply_signals(cells)
-    assert order[0] == "C2"                       # visual is high, so it comes first
-    assert "E2" in order                          # the anomaly is medium
-    assert cells[3].signals[0].type == "anomaly"
+    assert order == ["C2"]                        # the author's highlight
+    assert not cells[3].signals                   # statistical cue is off by default
+
+
+def test_the_statistical_cue_is_off_by_default():
+    """We report what is there. "61% below the median" is us judging a value.
+
+    The rule is kept and still tested; it is simply not announced. Reversing the
+    decision is this one flag.
+    """
+    cells = row([80_000, 82_000, 79_000, 31_000, 83_000, 81_000])
+    assert attention.find_signals(cells) == {}
+    louder = attention.find_signals(cells, include_statistical=True)
+    assert "E2" in louder and louder["E2"][0].type == "anomaly"
