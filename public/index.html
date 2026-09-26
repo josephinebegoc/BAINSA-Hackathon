@@ -4,14 +4,46 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Accessible Attention for Excel</title>
-  <style>
-    body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem; }
-    code { background: #f0f0f0; padding: .1em .3em; border-radius: 3px; }
-  </style>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <h1>Accessible Attention for Excel</h1>
-  <p>Screen readers make spreadsheet cells readable. We make visual attention accessible.</p>
-  <p>Phase 0 skeleton. Health check: <a href="/api/health"><code>/api/health</code></a></p>
+  <header>
+    <h1>Accessible Attention for Excel</h1>
+    <p class="tagline">Screen readers make spreadsheet cells readable. We make visual attention accessible.</p>
+    <div class="controls">
+      <button type="button" id="load-demo">Load demo</button>
+    </div>
+    <p id="status">Press "Load demo" to open the sample sales sheet.</p>
+  </header>
+
+  <main>
+    <h2 id="sheet-title" hidden></h2>
+    <div id="grid"
+         role="application"
+         tabindex="0"
+         aria-label="Spreadsheet. Use the arrow keys to move between cells. Press N for the next important cell, and H for help.">
+    </div>
+
+    <!-- Shows the last announcement for sighted viewers. Hidden from screen
+         readers, which hear the same text through the live regions below. -->
+    <p id="caption" aria-hidden="true"></p>
+
+    <details id="help">
+      <summary>Keyboard shortcuts</summary>
+      <ul>
+        <li><kbd>Arrow keys</kbd> move one cell</li>
+        <li><kbd>O</kbd> overview of the sheet</li>
+        <li><kbd>N</kbd> / <kbd>Shift+N</kbd> next / previous important cell</li>
+        <li><kbd>W</kbd> or <kbd>?</kbd> why is this cell important?</li>
+        <li><kbd>R</kbd> / <kbd>C</kbd> read the whole row / column</li>
+        <li><kbd>Esc</kbd> stop speaking</li>
+        <li><kbd>H</kbd> hear these shortcuts</li>
+      </ul>
+    </details>
+  </main>
+
+  <div id="live-polite" class="visually-hidden" aria-live="polite"></div>
+  <div id="live-assertive" class="visually-hidden" aria-live="assertive"></div>
 </body>
 </html>
