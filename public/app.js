@@ -38,20 +38,25 @@ const ERROR_WORDS = {
 };
 
 // Said (or shown) as the page opens, before any key has been pressed.
-const OPENING = "Press any key to start, or L to load the demo.";
+const OPENING =
+  "Press any key to start, L to load the demo, or U to upload your own spreadsheet.";
 // Said once the first key, click or tap has turned sound on.
 const WELCOME =
-  "Welcome. Press L, or the Load demo button at the top of the page, " +
-  "to open the demo sheet. Press H for help.";
+  "Welcome. Press L to open the demo sheet, or U to upload your own spreadsheet. " +
+  "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
-const KEYS_WITHOUT_SHEET = new Set(["l", "h", "Escape"]);
+const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "Escape"]);
+// Vercel rejects bodies over about 4.5 MB before the server sees them, so we
+// check first and say so, rather than failing with no explanation.
+const MAX_UPLOAD_BYTES = 4_000_000;
 
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
   "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
-  "R reads the whole row, C the whole column. L loads the demo sheet again. " +
+  "R reads the whole row, C the whole column. L loads the demo sheet. " +
+  "U uploads your own spreadsheet. " +
   "Escape stops speaking.";
 
 // Hovering announces the cell under the mouse, at most this often.
@@ -392,7 +397,13 @@ function describeCell(row, col) {
   }
   if (looks.length) parts.push(sentenceCase(looks.join(", ")));
 
-  return [...signals.map((s) => cueWithFact(s, cell)), ...parts].join(". ") + ".";
+  const cueFacts = signals.map((s) => cueWithFact(s, cell));
+  const mismatch = formatMismatch(row, col);
+  if (mismatch) {
+    cueFacts.push(mismatch.alert);
+    if (mismatch.stored) parts.push(mismatch.stored);
+  }
+  return [...cueFacts, ...parts].join(". ") + ".";
 }
 
 // "Pattern cue: Falls 60% after 6 months of rises". The engine's detail is a
@@ -404,6 +415,51 @@ function cueWithFact(signal, cell) {
   const fact = (signal.detail || "").trim().replace(/\.$/, "");
   if (!fact || (signal.type === "error" && cell?.error)) return name;
   return `${name}: ${fact}`;
+}
+
+// ---------- Number formats that don't match their row ----------
+// September formatted as a percentage among months shown in euros reads as
+// "6,900,000.0%". A sighted reader would spot that the column looks different;
+// we say so on every cell of it, as facts. Only the columns Margaux's engine
+// names as comparable (series_cols) are compared, so a growth ratio is never
+// measured against sales. No series_cols, no alert: we don't guess.
+
+const FORMAT_WORDS = { percent: "a percentage", currency: "currency", plain: "a plain number" };
+const CURRENCY_WORDS = { "€": "euros", "$": "dollars", "£": "pounds", "¥": "yen" };
+
+// "percent", "currency" or "plain" for a numeric cell; null otherwise.
+function formatKind(cell) {
+  if (typeof cell?.value !== "number") return null;
+  const format = cell.number_format || "General";
+  if (format.includes("%")) return "percent";
+  if (/[€$£¥]|\[\$/.test(format)) return "currency";
+  return "plain";
+}
+
+// { alert, stored } when this cell's format differs from most of its row, or null.
+function formatMismatch(row, col) {
+  const series = state.sheet.series_cols || [];
+  if (row === state.sheet.header_row || !series.includes(col)) return null;
+  const cell = cellAt(row, col);
+  const kind = formatKind(cell);
+  if (!kind) return null;
+
+  const others = series.filter((c) => c !== col).map((c) => cellAt(row, c)).filter(formatKind);
+  const counts = {};
+  for (const other of others) counts[formatKind(other)] = (counts[formatKind(other)] || 0) + 1;
+  const [usual, howMany] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  // Only when most of the row clearly agrees on something else.
+  if (!usual || usual === kind || howMany <= others.length / 2) return null;
+
+  const example = others.find((other) => formatKind(other) === usual);
+  const symbol = example.display.match(/[€$£¥]/)?.[0];
+  const theirs = usual === "currency" ? CURRENCY_WORDS[symbol] || "currency" : FORMAT_WORDS[usual];
+  // The stored number only adds something when the format hides it (6,900,000.0%).
+  const stored = cell.value.toLocaleString("en-US");
+  return {
+    alert: `Format differs from the rest of the row: shown as ${FORMAT_WORDS[kind]} while the others show ${theirs}`,
+    stored: cell.display === stored ? null : `The number stored is ${stored}`,
+  };
 }
 
 // ---------- What it looks like (the author's visual vocabulary) ----------
@@ -484,7 +540,8 @@ function spokenFormula(formula) {
 // Flagged cells interrupt politely-queued output.
 function announceFocus(prefix = "") {
   const { row, col } = state.focus;
-  const type = topSignal(cellAt(row, col));
+  // A format mismatch gets the same "something here" chime as a flagged cell.
+  const type = topSignal(cellAt(row, col)) || (formatMismatch(row, col) ? "visual" : null);
   const soundMs = cues.play(type || "tick");
   voice.announce(prefix + describeCell(row, col), {
     priority: type ? "assertive" : "polite",
@@ -636,6 +693,9 @@ function describeFocus() {
 
   if (cell?.formula) out.push(`Calculated by the formula ${spokenFormula(cell.formula)}`);
 
+  const mismatch = formatMismatch(row, col);
+  if (mismatch) out.push(...[mismatch.alert, mismatch.stored].filter(Boolean));
+
   const looks = formattingWords(row, col, cell, { everything: true });
   out.push(looks.length ? `Formatting: ${looks.join(", ")}` : "No special formatting");
 
@@ -694,6 +754,7 @@ const KEY_ACTIONS = {
   "?": explainFocus,
   d: describeFocus,
   l: () => startLoadingDemo(),
+  u: () => chooseFile(),
   r: readRow,
   c: readColumn,
   h: () => voice.announce(HELP_TEXT),
@@ -773,7 +834,9 @@ document.addEventListener(
     event.preventDefault(); // this key only starts; it doesn't also act on the grid
     event.stopPropagation();
     // L goes straight to the demo; any other key starts with the welcome.
-    if (event.key.toLowerCase() === "l") startLoadingDemo();
+    const key = event.key.toLowerCase();
+    if (key === "l") startLoadingDemo();
+    else if (key === "u") chooseFile();
     else startBtn.click();
   },
   { capture: true }
@@ -789,6 +852,51 @@ function startLoadingDemo() {
 }
 
 document.getElementById("load-demo").addEventListener("click", startLoadingDemo);
+
+// ---------- Upload your own spreadsheet ----------
+
+const fileInput = document.getElementById("file-input");
+
+// U, or the Upload button: open the browser's file picker.
+function chooseFile() {
+  cues.unlock();
+  startBtn.hidden = true;
+  document.title = "Accessible Attention for Excel";
+  voice.announce("Choose an Excel file.");
+  fileInput.value = ""; // so choosing the same file again still counts
+  fileInput.click();
+}
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0];
+  if (file) uploadOwnFile(file);
+});
+// Closing the picker without choosing (supported in recent browsers).
+fileInput.addEventListener("cancel", () => voice.announce("No file chosen."));
+
+async function uploadOwnFile(file) {
+  // Checked here too so the answer is instant and doesn't depend on the network.
+  if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
+    sayProblem("That file is not an Excel workbook. Please choose an .xlsx file.");
+    return;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const megabytes = Math.round(file.size / 1_000_000);
+    sayProblem(`That file is ${megabytes} megabytes, which is too large. The limit is about 4 megabytes.`);
+    return;
+  }
+  const name = file.name.replace(/\.(xlsx|xlsm)$/i, "");
+  statusEl.textContent = `Opening ${name}…`;
+  voice.announce(`Opening ${name}.`);
+  const reached = await uploadWorkbook(file, file.name);
+  // Unlike the demo, there is no offline copy of the user's own file.
+  if (!reached) sayProblem("I couldn't reach the server, so I can't open your file right now. Please try again.");
+}
+
+function sayProblem(message) {
+  statusEl.textContent = message;
+  voice.announce(message);
+}
 
 // Test switches until the visible controls exist (Phase 3):
 // ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate,

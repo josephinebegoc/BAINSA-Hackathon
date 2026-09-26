@@ -28,7 +28,19 @@ button {
   background: #fff;
   cursor: pointer;
 }
-button:hover { background: #f1f3f5; }
+button:hover, label.button:hover { background: #f1f3f5; }
+
+/* The Upload button is a <label> for a hidden file input; look like a button. */
+label.button {
+  display: inline-block;
+  padding: .5rem 1rem;
+  border: 2px solid #1a1a1a;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+/* Tabbing onto the hidden input shows the outline on its visible button. */
+#file-input:focus-visible + label.button { outline: 3px solid var(--focus); outline-offset: 2px; }
 button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
 /* Start: covers the whole screen, so a tap or click anywhere finds it.
