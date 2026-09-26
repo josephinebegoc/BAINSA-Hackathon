@@ -12,10 +12,13 @@ information without the verdict attached.
 Template first, always. The LLM only rephrases, and any failure falls back here.
 """
 
+import json
+import os
 import statistics
 
 from . import attention
-from .models import OverviewFacts, SheetModel
+from .explain import JUDGEMENT_WORDS, _acceptable
+from .models import OverviewFacts, SheetModel, TextResponse
 
 CUE_NAMES = {
     "visual": "author visual cue",
@@ -120,3 +123,42 @@ def template(facts: OverviewFacts) -> str:
 
 def overview_for(model: SheetModel) -> str:
     return template(facts_for(model))
+
+
+SYSTEM = """You rewrite a spreadsheet's measurements as a short spoken orientation \
+for someone about to explore it by ear.
+
+Rules, all of them absolute:
+- Use only the facts you are given. Never state a number that is not in the input.
+- Say what the sheet contains. Never say whether the numbers are good, bad, rising, \
+falling, healthy or worth attention, and never suggest what to look at or do.
+- Plain spoken English. No markdown, no bullet points, no headings.
+- Two sentences at most."""
+
+
+def polish_overview(facts: OverviewFacts, timeout: float = 5.0) -> TextResponse:
+    """The template, rephrased. Any failure at all returns the template."""
+    fallback = TextResponse(text=template(facts), source="template")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return fallback
+
+    payload = facts.model_dump_json()
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic()
+        response = client.with_options(timeout=timeout).messages.create(
+            model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-5"),
+            max_tokens=256,
+            system=SYSTEM,
+            output_config={"effort": "low"},
+            messages=[{"role": "user", "content": payload}],
+        )
+        text = "".join(b.text for b in response.content if b.type == "text").strip()
+    except Exception:
+        return fallback
+
+    if not _acceptable(text, payload + " " + fallback.text):
+        return fallback
+    return TextResponse(text=text, source="llm")
