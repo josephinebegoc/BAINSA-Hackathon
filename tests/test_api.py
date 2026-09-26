@@ -214,3 +214,12 @@ def test_the_prefix_survives_when_the_cue_does_not_name_the_row():
         signals=[Signal(type="trend", severity="medium",
                         detail="Falls 60% after 6 months of rises")])
     assert template(request).startswith("Italy, August.")
+
+
+def test_upload_names_the_sheets_main_series(client):
+    """sonify.js puts every row on one pitch scale and needs to know which columns."""
+    body = upload(client).json()
+    assert body["series_cols"] == list(range(2, 14))          # Jan..Dec
+    headers = [body["col_headers"][c - 1] for c in body["series_cols"]]
+    assert headers[0] == "Jan" and headers[-1] == "Dec"
+    assert "Growth vs Jan" not in headers

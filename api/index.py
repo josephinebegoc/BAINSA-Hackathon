@@ -122,6 +122,12 @@ async def upload(file: UploadFile = File(...)):
         model.attention_order = []
 
     try:
+        model.series_cols = attention.main_series_columns(
+            model.cells, model.header_row, model.label_col)
+    except Exception:
+        model.series_cols = []
+
+    try:
         model.overview = overview_for(model)
     except Exception:
         model.overview = f"{model.title}. {model.n_rows} rows by {model.n_cols} columns."

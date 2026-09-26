@@ -366,3 +366,18 @@ def test_format_kind_names_what_a_reader_sees():
     assert attention.format_kind('"€"#,##0') == "currency"
     assert attention.format_kind("General") == "a plain number"
     assert attention.format_kind(None) == "a plain number"
+
+
+# --- the sheet's main series, for one pitch scale ----------------------------
+
+def test_main_series_columns_excludes_a_different_quantity():
+    """Trend Scan needs one scale for the sheet. A growth ratio must not set it."""
+    cells = sheet_with_growth_column(lambda g: f"{g}")
+    cells += [Cell(ref=f"{chr(64 + c)}1", row=1, col=c, value=f"H{c}", bold=True)
+              for c in range(1, 7)]
+    assert attention.main_series_columns(cells, header_row=1, label_col=1) == [2, 3, 4, 5]
+
+
+def test_main_series_columns_survives_a_sheet_with_no_numbers():
+    cells = [Cell(ref="A1", row=1, col=1, value="hello", display="hello")]
+    assert attention.main_series_columns(cells) == []
