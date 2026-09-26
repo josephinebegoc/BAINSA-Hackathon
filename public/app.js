@@ -170,6 +170,10 @@ function showSheet(sheet, note = "") {
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
+  const flagged = sheet.attention_order.length;
+  document.getElementById("sheet-facts").textContent =
+    `${sheet.n_cols} columns · ${sheet.n_rows} rows · ` +
+    `${flagged} flagged ${flagged === 1 ? "cell" : "cells"}`;
   statusEl.textContent =
     `${sheet.title} loaded. ${sheet.attention_order.length} cells flagged. ` +
     `Voice: ${voice.getVoiceName()}.`;
@@ -310,6 +314,37 @@ function setFocus(row, col) {
   td.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   state.focus = { row, col };
+  showCurrentCell(row, col);
+}
+
+// Short names for the Current cell panel, in the same order as the letters.
+const SOURCE_NAMES = { visual: "Author", anomaly: "Anomaly", trend: "Pattern", error: "Error" };
+
+// The Current cell panel under the grid, for sighted viewers following along.
+function showCurrentCell(row, col) {
+  const cell = cellAt(row, col);
+  const ref = columnLetter(col) + row;
+  const value = cell?.display || "Blank";
+  const inBody = row !== state.sheet.header_row && col !== state.sheet.label_col;
+  const parts = inBody
+    ? [rowLabel(row), colHeader(col), state.sheet.value_label, value]
+    : [value];
+  document.getElementById("current-cell-text").textContent =
+    `${ref} · ${parts.filter(Boolean).join(" · ")}`;
+
+  const list = document.getElementById("current-cell-cues");
+  list.replaceChildren(
+    ...(cell?.signals || []).map((signal) => {
+      const li = document.createElement("li");
+      const badge = document.createElement("span");
+      badge.className = `marker marker-${signal.type}`;
+      badge.textContent = SIGNAL_LETTERS[signal.type] || "?";
+      const source = document.createElement("strong");
+      source.textContent = (SOURCE_NAMES[signal.type] || signal.type).toUpperCase();
+      li.append(badge, " ", source, ` ${signal.detail}`);
+      return li;
+    })
+  );
 }
 
 // ---------- What we say (EXPLORE) ----------
@@ -493,7 +528,12 @@ function flaggedOrder() {
 }
 
 function cycleFilter() {
-  state.filter = (state.filter + 1) % FILTERS.length;
+  setFilter((state.filter + 1) % FILTERS.length);
+}
+
+// F cycles; the Attention buttons pick one directly.
+function setFilter(index) {
+  state.filter = index;
   showModeLine();
   const count = flaggedOrder().length;
   const signals = count === 0 ? "No signals" : count === 1 ? "1 signal" : `${count} signals`;
@@ -519,6 +559,13 @@ function setMode(mode) {
 function showModeLine() {
   document.getElementById("mode-line").textContent =
     `Mode: ${MODES[state.mode].name} · Filter: ${FILTERS[state.filter].name}`;
+  // Keep the on-screen buttons in step, whether a key or a click changed them.
+  for (const button of document.querySelectorAll("button.mode")) {
+    button.setAttribute("aria-pressed", String(button.dataset.mode === state.mode));
+  }
+  for (const button of document.querySelectorAll("button.filter")) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.filter) === state.filter));
+  }
 }
 
 // ---------- Trend Scan ----------
@@ -1033,6 +1080,34 @@ function startLoadingDemo() {
 }
 
 document.getElementById("load-demo").addEventListener("click", startLoadingDemo);
+
+// ---------- On-screen controls ----------
+// Each button does exactly what its key does on the grid, then hands focus
+// back to the grid so the keys keep working.
+
+for (const button of document.querySelectorAll("button.mode")) {
+  button.addEventListener("click", () => {
+    setMode(button.dataset.mode);
+    gridEl.focus();
+  });
+}
+
+for (const button of document.querySelectorAll("button.filter")) {
+  button.addEventListener("click", () => {
+    setFilter(Number(button.dataset.filter));
+    gridEl.focus();
+  });
+}
+
+document.getElementById("next-signal").addEventListener("click", () => {
+  cues.unlock();
+  gridEl.focus();
+  if (!state.sheet) {
+    voice.announce("No sheet is open yet. Press L to load the demo.");
+    return;
+  }
+  jumpToFlagged(1);
+});
 
 // ---------- Upload your own spreadsheet ----------
 
