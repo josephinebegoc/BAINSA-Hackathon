@@ -51,6 +51,7 @@ const state = {
 const gridEl = document.getElementById("grid");
 const statusEl = document.getElementById("status");
 const titleEl = document.getElementById("sheet-title");
+const startBtn = document.getElementById("start");
 
 // ---------- Loading ----------
 
@@ -80,19 +81,17 @@ function showSheet(sheet) {
   // Start on the first data cell, just below the header and right of the labels.
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
-  voice.announce(`${sheet.title} loaded. ${flaggedSummary()}`);
+  // ORIENT: an instant spoken overview whenever a sheet opens.
+  voice.announce(orientation());
 }
 
-function flaggedSummary() {
-  const count = state.sheet.attention_order.length;
-  if (count === 0) {
-    return "No cells flagged. Press O for an overview, or H for help.";
-  }
-  const cells = count === 1 ? "1 cell flagged" : `${count} cells flagged`;
-  return (
-    `${cells}. Press Space to go to the first one, N for the next, ` +
-    "O for an overview, or H for help."
-  );
+// The overview, then what the user can do next.
+function orientation() {
+  const overview = state.sheet.overview || `${state.sheet.title}.`;
+  const next = state.sheet.attention_order.length
+    ? "Press Space to go to the first flagged cell, use the arrow keys to explore, or press H for help."
+    : "Use the arrow keys to explore, or press H for help.";
+  return `${overview} ${next}`;
 }
 
 // ---------- Rendering ----------
@@ -600,9 +599,25 @@ function announceHover() {
   announceFocus("", { cueFirst: true });
 }
 
+// Start: the click that lets the browser play sound and speech. It opens the
+// demo sheet (unless one is already showing) and speaks its overview.
+startBtn.addEventListener("click", () => {
+  cues.unlock();
+  startBtn.hidden = true;
+  if (state.sheet) {
+    gridEl.focus();
+    voice.announce(orientation());
+    return;
+  }
+  // Speaking inside the click is what unlocks speech on iPhones and iPads.
+  voice.announce("Loading the sample sheet.");
+  loadFixture();
+});
+
 document.getElementById("load-demo").addEventListener("click", () => {
   // Phase 2 switches this to /demo/sales_demo.xlsx → /api/upload.
   cues.unlock(); // this click is what lets the browser play sound later
+  startBtn.hidden = true; // sound is unlocked now, so Start has done its job
   loadFixture();
 });
 
