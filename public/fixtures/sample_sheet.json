@@ -727,7 +727,7 @@
         {
           "type": "trend",
           "severity": "medium",
-          "detail": "Breaks a 4-month upward trend"
+          "detail": "Falls 45% after 4 months of rises"
         }
       ]
     },

@@ -25,6 +25,31 @@ So the product is not data analysis. It is **recovering information that sighted
 users perceive through a different channel**, and delivering it *continuously, during
 exploration* — without asking the author to redesign anything.
 
+### Convey, don't conclude
+
+**We do not analyse the spreadsheet for the user. We give them everything a sighted
+person would take in at a glance, and let them do their own analysing.**
+
+A sighted person perceives before they think: the red cell, the number sitting oddly
+among its neighbours, the jagged shape of a row. Then *they* judge what it means. Our
+job is to restore the perceiving, not to replace the judging. Three rules follow, and
+they are not negotiable:
+
+1. **Report facts, never verdicts.** "61% below Italy's median" — not "this value is
+   unusually low". "Falls 45% after four months of rises" — not "this is a worrying
+   drop". Give the measurement and let the user draw the conclusion. Never recommend,
+   never warn, never editorialise.
+2. **Cues are signposts, not filters.** Flagging a cell must never be the only way to
+   reach information. Every cell stays explorable, every cell can be described on
+   demand, and the user can always ask what is around them. We are not deciding what
+   they are allowed to notice — we are making noticing possible.
+3. **Anything visible is theirs to have.** If a sighted person could see it —
+   formatting, a comment marker, a highlight, an error — the user can ask for it,
+   whether or not our rules flagged it.
+
+This is also the answer to "isn't this just AI doing the analysis?" It is not. The
+engine points; the user decides.
+
 That phrase, **continuous accessible attention while navigating**, is the
 differentiator. Anything that only works as a one-off report is off-message.
 
@@ -36,9 +61,12 @@ statistics. Keep this vocabulary in the pitch and the UI:
 | Cue | Signal `type` | Sounds like |
 |---|---|---|
 | **Author visual cue** | `visual` | "The author highlighted this red." |
-| **Statistical cue** | `anomaly` | "This value is unusually low." |
-| **Pattern cue** | `trend` | "This breaks an upward trend." |
-| **Functional cue** | `error` | "This cell contains an error." |
+| **Statistical cue** | `anomaly` | "61% below Italy's median." |
+| **Pattern cue** | `trend` | "Falls 45% after four months of rises." |
+| **Functional cue** | `error` | "This cell contains a division-by-zero error." |
+
+Note the phrasing: each one states what is there, not what to think about it. "This
+value is unusually low" would be us doing the analysing.
 
 The first row is the one nobody else does, and it is the reason the product exists.
 Give author visual semantics at least as much care as the statistics.
@@ -72,7 +100,8 @@ URL).** Then pick off the cheap, on-message ones in this order.
 | **Attention Map** | Ranks areas needing attention | ★★★★★ | **Engine side already done** — that is exactly what `attention_order` is. Only a visual/spoken summary is missing. |
 | **Visual Semantics Translator** | Turns formatting into meaning and cues | ★★★★★ | **Partly done** (fill, font colour, bold). Deepening it is the highest-value work left: italic, underline, strikethrough, borders, cell comments, conditional formatting. |
 | **Author Intent vs AI Insight** | Separates "the author marked this" from "we detected this" | ★★★★★ | **Nearly free.** `Signal.type` already encodes it: `visual` is the author, `anomaly`/`trend` are us, `error` is the file. Costs one grouping in the announcement, and it states the core message out loud. Do this one. |
-| **Attention Filters** | User chooses which cues they want to notice | ★★★★ | Cheap. Signals are already typed; needs a toggle in the UI and a filter on `attention_order`. |
+| **Describe this cell** | On demand, everything a sighted person would see about the current cell — fill, font colour, bold, italic, borders, comment, number format — flagged or not | ★★★★★ | Cheap once extraction captures it, and it is the purest expression of "convey, don't conclude". Strong candidate. |
+| **Attention Filters** | User chooses which cues they want to notice | ★★★★ | Cheap. Signals are already typed; needs a toggle in the UI and a filter on `attention_order`. Real agency: the user decides what counts. |
 | **Context Radius** | Explains what surrounds the selected cell | ★★★★ | Cheap. Everything needed is already in the `SheetModel` the browser holds. |
 | **Audio Heatmap** | Different sounds convey sheet characteristics | ★★★★ | Medium, and entirely Josephine's side — a natural extension of `cues.js`. |
 | **Change Radar** | Compares two versions of a workbook | ★★★★★ | **Expensive.** Needs two uploads, a diffing pass, and a different API shape. Do not start it before the freeze. |
@@ -223,7 +252,7 @@ Optional LLM polish: send only the facts JSON, ask for 2 sentences maximum and n
 
 - Input: one cell plus its signals and row context (neighbouring values).
 - Template fallback joins the signal details: "Revenue is 43% below Italy's median and breaks a 4-month upward trend. The author also highlighted this cell in red."
-- LLM prompt: facts only, 1–2 sentences, plain spoken English, no markdown, never state a number that isn't in the input.
+- LLM prompt: facts only, 1–2 sentences, plain spoken English, no markdown, never state a number that isn't in the input. **No judgement words and no recommendations** — not "worrying", "concerning", "should", "problem". Describe what is there; the user decides what it means. If the model editorialises, fall back to the template.
 - Cache results in the browser per cell ref (the server is stateless).
 
 ## Frontend interaction
