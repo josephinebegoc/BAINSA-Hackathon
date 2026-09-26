@@ -194,6 +194,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
   "col_headers": ["Country", "Jan", "Feb", "...", "Dec", "Growth %"],
   "row_labels": ["France", "Italy", "..."],
   "value_label": "sales",
+  "series_cols": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
   "overview": "This sheet contains monthly revenue for eight countries...",
   "cells": [
     {
@@ -338,12 +339,20 @@ reader does this, and it is the clearest demonstration of the whole idea.
 touches it:
 
 ```js
+// Once per sheet: every value from the columns SheetModel.series_cols names.
+// Fixes the pitch scale for the whole sheet, so rows can be compared by ear.
+export function setScale(allValues)
+
 // Play one row or column as tones. Returns how long it will take in ms, so speech
 // can wait for it the way cues.play() already does.
 export function playSeries({ values, label, unit }, { onDone } = {})
 export function stop()                 // Escape
 export function isSupported()          // false without Web Audio; app.js falls back to Concise
 ```
+
+`SheetModel.series_cols` names the columns holding the sheet's main quantity, so the
+frontend never has to work out which values are comparable -- that logic lives in
+`attention.main_series_columns()` and belongs in one place.
 
 - `values` — the numbers in order, `null` for empty cells
 - `label` — `"Italy, January to December"`, spoken before the tones

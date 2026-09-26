@@ -333,6 +333,22 @@ def _runs(columns: list[int], kinds: dict[int, str]) -> list[list[int]]:
     return runs
 
 
+def main_series_columns(
+    cells: list[Cell], header_row: int = 1, label_col: int = 1
+) -> list[int]:
+    """The columns holding the sheet's main quantity, largest group first.
+
+    The same like-with-like grouping the cues use, exposed so the frontend can put
+    every row on one pitch scale without having to work out which columns are
+    comparable -- that logic lives here and should live in exactly one place.
+    """
+    body = [c for c in cells if c.row != header_row and c.col != label_col]
+    groups = comparable_axes(body, "col")
+    if not groups:
+        return []
+    return sorted(max(groups, key=len))
+
+
 def visual_signal(cell: Cell, line: list[Cell]) -> Signal | None:
     """The author drew attention to this cell by hand."""
     if cell.fill:
