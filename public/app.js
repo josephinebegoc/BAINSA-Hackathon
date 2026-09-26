@@ -5,6 +5,7 @@ import * as cues from "./cues.js";
 
 const FIXTURE_URL = "/fixtures/sample_sheet.json"; // offline copy, and ?fixture=1
 const DEMO_URL = "/demo/sales_demo.xlsx";
+const CHART_DEMO_URL = "/demo/sales_chart_demo.xlsx"; // the same sheet plus a line chart
 // Margaux's server waits up to 5 s for the AI, then answers with its template;
 // we give it a little longer before using our own local explanation.
 const EXPLAIN_TIMEOUT_MS = 6000;
@@ -43,6 +44,10 @@ const HELP_TEXT =
   "N jumps to the next flagged cell, Shift N to the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
   "R reads the whole row, C the whole column. Escape stops speaking.";
+// Added to the help only when the sheet has a chart.
+const CHART_HELP =
+  " G explores the chart. In the chart, the left and right arrows move between " +
+  "points, and Escape returns to the sheet.";
 
 // Hovering announces the cell under the mouse, at most this often.
 const HOVER_THROTTLE_MS = 150;
@@ -52,6 +57,7 @@ const state = {
   cellsByRef: new Map(),
   focus: null, // { row, col }
   explanations: new Map(), // ref → text from /api/explain, for this sheet only
+  chart: null, // while exploring a chart: { chart, series, point, status }
 };
 
 const gridEl = document.getElementById("grid");
@@ -63,15 +69,22 @@ const startBtn = document.getElementById("start");
 
 // Load demo: the demo workbook goes through exactly the same pipeline as a real
 // upload. If the server can't be reached, the offline copy keeps the demo alive.
-async function loadDemo() {
+async function loadDemo(url = DEMO_URL, name = "sales_demo.xlsx") {
   statusEl.textContent = "Opening the demo workbook…";
   try {
-    const res = await fetch(DEMO_URL);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const reached = await uploadWorkbook(await res.blob(), "sales_demo.xlsx");
+    const reached = await uploadWorkbook(await res.blob(), name);
     if (reached) return;
   } catch (err) {
     console.error(err);
+  }
+  if (url !== DEMO_URL) {
+    // The offline copy has no chart, so it would not be the chart demo.
+    const message = "I couldn't reach the server, so the chart demo can't be opened.";
+    statusEl.textContent = message;
+    voice.announce(message);
+    return;
   }
   await loadFixture("I couldn't reach the server, so this is the offline copy of the demo.");
 }
@@ -121,6 +134,7 @@ function showSheet(sheet, note = "") {
   state.sheet = sheet;
   state.cellsByRef = new Map(sheet.cells.map((c) => [c.ref, c]));
   state.explanations.clear();
+  state.chart = null;
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
@@ -143,7 +157,8 @@ function orientation() {
   const next = state.sheet.attention_order.length
     ? "Press Space to go to the first flagged cell, use the arrow keys to explore, or press H for help."
     : "Use the arrow keys to explore, or press H for help.";
-  return `${overview} ${next}`;
+  const chart = hasChart() ? " Press G to explore the chart." : "";
+  return `${overview} ${next}${chart}`;
 }
 
 // ---------- Rendering ----------
@@ -457,11 +472,12 @@ function spokenFormula(formula) {
 
 // The cue's sound plays first; speech waits until it has finished.
 // Flagged cells interrupt politely-queued output.
-function announceFocus(prefix = "") {
+// suffix: said after the cell, e.g. what the chart also marks at this cell.
+function announceFocus(prefix = "", suffix = "") {
   const { row, col } = state.focus;
   const type = topSignal(cellAt(row, col));
   const soundMs = cues.play(type || "tick");
-  voice.announce(prefix + describeCell(row, col), {
+  voice.announce(prefix + describeCell(row, col) + suffix, {
     priority: type ? "assertive" : "polite",
     delay: soundMs,
   });
@@ -521,6 +537,11 @@ function speakOverview() {
 // Asks /api/explain; on any failure uses localExplanation(). Answers are kept
 // per cell for this sheet, since the server remembers nothing.
 async function explainFocus() {
+  if (state.chart) return explainPoint();
+  return explainCell();
+}
+
+async function explainCell() {
   const { row, col } = state.focus;
   const cell = cellAt(row, col);
   if (!cell?.signals.length) {
@@ -528,8 +549,10 @@ async function explainFocus() {
     return;
   }
   const ref = cell.ref;
+  // What the chart also says here, when a chart point shares this cell's stop.
+  const chartNote = chartNoteFor(ref);
   if (state.explanations.has(ref)) {
-    voice.announce(state.explanations.get(ref));
+    voice.announce(withNote(state.explanations.get(ref), chartNote));
     return;
   }
 
@@ -540,7 +563,11 @@ async function explainFocus() {
 
   // Don't talk over a cell the user has already moved on from.
   if (state.focus.row !== row || state.focus.col !== col) return;
-  voice.announce(fromServer || localExplanation(cell, row, col));
+  voice.announce(withNote(fromServer || localExplanation(cell, row, col), chartNote));
+}
+
+function withNote(text, note) {
+  return note ? `${text} ${note}` : text;
 }
 
 async function fetchExplanation(cell, row, col) {
@@ -645,23 +672,195 @@ function readColumn() {
   voice.announce(empty ? `${header}. Empty column.` : `${header}. ${parts.join(". ")}.`);
 }
 
+// ---------- Charts (EXPLORE, NOTICE, UNDERSTAND) ----------
+//
+// The backend sends one line chart in sheet.charts, and sheet.attention_items:
+// the N order across cells and chart points, one stop per place. A sheet without
+// chart events has no attention_items, and everything below stays out of the way.
+
+const CHART_WORDS = { line: "Line chart" };
+
+function hasChart() {
+  return Boolean(state.sheet?.charts?.length);
+}
+
+function attentionItems() {
+  return state.sheet?.attention_items || [];
+}
+
+function currentPoint() {
+  const { chart, series, point } = state.chart;
+  return { line: chart.series[series], data: chart.series[series].points[point] };
+}
+
+// The N stop at this chart point, if any (a chart stop, or a cell stop it joined).
+function itemAtPoint() {
+  const { chart, series, point } = state.chart;
+  return attentionItems().find(
+    (it) => it.chart === chart.id && it.series === series && it.point === point
+  );
+}
+
+// "Lowest point, largest fall." from ["Lowest point: August", "Largest fall: August"]
+function chartLabels(item) {
+  return sentenceCase(item.labels.map((l) => l.split(":")[0].toLowerCase()).join(", ")) + ".";
+}
+
+// For W on a cell: what a chart point sharing this cell's stop adds.
+function chartNoteFor(ref) {
+  const item = attentionItems().find((it) => it.kind === "cell" && it.ref === ref);
+  return item?.events.length ? item.explanation : "";
+}
+
+// Keep the grid's focus on the point's source cell, so sighted viewers can follow.
+function focusPoint() {
+  const cell = state.cellsByRef.get(currentPoint().data.ref);
+  if (cell) setFocus(cell.row, cell.col);
+}
+
+// "Chart. Pattern cue. Italy. August. €62,000. Lowest point, largest fall."
+function announcePoint(prefix = "") {
+  const { line, data } = currentPoint();
+  const item = itemAtPoint();
+  const name = line.name || state.chart.chart.title || "Line";
+  const said = `${name}. ${spokenHeader(data.category)}. ${data.display || "blank"}.`;
+  // The chart's cues are pattern cues: the same single sound as every other cue.
+  const soundMs = cues.play(item ? "trend" : "tick");
+  const text = item ? `${prefix}Chart. Pattern cue. ${said} ${chartLabels(item)}` : prefix + said;
+  voice.announce(text, { priority: item ? "assertive" : "polite", delay: soundMs });
+}
+
+function openChart(chart, series, point) {
+  if (!state.chart) {
+    state.chart = { status: statusEl.textContent };
+  }
+  Object.assign(state.chart, { chart, series, point });
+  statusEl.textContent =
+    `Exploring the chart ${chart.title || ""}. ` +
+    "Left and right move between points. Escape returns to the sheet.";
+  focusPoint();
+}
+
+// G: into the chart, starting at the point under the grid focus if there is one.
+function enterChart() {
+  if (!hasChart()) return;
+  const chart = state.sheet.charts[0];
+  const points = chart.series[0].points;
+  const here = columnLetter(state.focus.col) + state.focus.row;
+  const start = Math.max(points.findIndex((p) => p.ref === here), 0);
+  openChart(chart, 0, start);
+
+  const names = chart.series.map((s) => s.name).filter(Boolean);
+  const intro = [
+    CHART_WORDS[chart.kind] || "Chart",
+    chart.title || "Untitled",
+    names.length ? `Series: ${names.join(", ")}` : "",
+    `${spokenHeader(points[0].category)} to ${spokenHeader(points[points.length - 1].category)}`,
+  ].filter(Boolean).join(". ");
+  announcePoint(`${intro}. `);
+}
+
+function movePoint(step) {
+  const { line } = currentPoint();
+  const point = state.chart.point + step;
+  if (point < 0 || point >= line.points.length) {
+    voice.announce(step < 0 ? "Start of chart." : "End of chart.");
+    return;
+  }
+  state.chart.point = point;
+  focusPoint();
+  announcePoint();
+}
+
+// Escape (announce) or a click on the grid (silent): back to the spreadsheet.
+function leaveChart(announce) {
+  if (!state.chart) return;
+  statusEl.textContent = state.chart.status;
+  state.chart = null;
+  if (announce) {
+    voice.stop();
+    voice.announce(`Back to the sheet. ${columnLetter(state.focus.col)}${state.focus.row}.`);
+  }
+}
+
+function chartHint() {
+  voice.announce("Left and right move between points. Escape returns to the sheet.");
+}
+
+// W in the chart: the prepared explanation. At a point that shares a flagged
+// cell's stop, the cell's own explanation comes first, then the chart's.
+function explainPoint() {
+  const item = itemAtPoint();
+  if (!item) {
+    voice.announce("No cues at this point.");
+    return;
+  }
+  if (item.kind === "cell") return explainCell();
+  voice.announce(item.explanation);
+}
+
+// N / Shift+N through attention_items, wrapping at either end, like jumpToFlagged.
+function jumpToItem(step) {
+  const items = attentionItems();
+  let i = currentItemIndex();
+  // Not on a stop: N goes to the first, Shift+N to the last.
+  if (i === -1) i = step > 0 ? -1 : 0;
+  goToItem((i + step + items.length) % items.length);
+}
+
+function currentItemIndex() {
+  const items = attentionItems();
+  if (state.chart) {
+    const item = itemAtPoint();
+    return item ? items.indexOf(item) : -1;
+  }
+  const here = columnLetter(state.focus.col) + state.focus.row;
+  return items.findIndex((it) => it.kind === "cell" && it.ref === here);
+}
+
+function goToItem(i) {
+  const items = attentionItems();
+  const item = items[i];
+  const prefix = `${i + 1} of ${items.length}. `;
+  if (item.kind === "chart") {
+    const chart = state.sheet.charts.find((c) => c.id === item.chart);
+    if (!chart) return;
+    openChart(chart, item.series, item.point);
+    announcePoint(prefix);
+    return;
+  }
+  leaveChart(false);
+  const cell = state.cellsByRef.get(item.ref);
+  if (!cell) return;
+  setFocus(cell.row, cell.col);
+  const alsoChart = item.events.length ? ` Also on the chart: ${chartLabels(item).toLowerCase()}` : "";
+  announceFocus(prefix, alsoChart);
+}
+
 // ---------- Events ----------
 
+// Chart keys only take over while a chart is open (arrows, Escape) or when the
+// sheet has chart events (N, Space). Otherwise every key does what it always did.
 const KEY_ACTIONS = {
-  ArrowUp: () => move(-1, 0),
-  ArrowDown: () => move(1, 0),
-  ArrowLeft: () => move(0, -1),
-  ArrowRight: () => move(0, 1),
-  " ": jumpToFirstFlagged,
-  n: (event) => jumpToFlagged(event.shiftKey ? -1 : 1),
+  ArrowUp: () => (state.chart ? chartHint() : move(-1, 0)),
+  ArrowDown: () => (state.chart ? chartHint() : move(1, 0)),
+  ArrowLeft: () => (state.chart ? movePoint(-1) : move(0, -1)),
+  ArrowRight: () => (state.chart ? movePoint(1) : move(0, 1)),
+  " ": () => (attentionItems().length ? goToItem(0) : jumpToFirstFlagged()),
+  n: (event) => {
+    const step = event.shiftKey ? -1 : 1;
+    if (attentionItems().length) jumpToItem(step);
+    else jumpToFlagged(step);
+  },
+  g: enterChart,
   o: speakOverview,
   w: explainFocus,
   "?": explainFocus,
   d: describeFocus,
   r: readRow,
   c: readColumn,
-  h: () => voice.announce(HELP_TEXT),
-  Escape: () => voice.stop(),
+  h: () => voice.announce(hasChart() ? HELP_TEXT + CHART_HELP : HELP_TEXT),
+  Escape: () => (state.chart ? leaveChart(true) : voice.stop()),
 };
 
 gridEl.addEventListener("keydown", (event) => {
@@ -671,6 +870,7 @@ gridEl.addEventListener("keydown", (event) => {
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const action = KEY_ACTIONS[key];
   if (!action) return;
+  if (key === "g" && !hasChart()) return; // a sheet without a chart: G does nothing, as before
   event.preventDefault();
   action(event);
 });
@@ -679,6 +879,7 @@ gridEl.addEventListener("click", (event) => {
   const td = event.target.closest("td[data-row]");
   if (!td || !state.sheet) return;
   cues.unlock();
+  leaveChart(false); // clicking a cell means exploring the sheet again
   setFocus(Number(td.dataset.row), Number(td.dataset.col));
   gridEl.focus();
   announceFocus();
@@ -702,6 +903,7 @@ function announceHover() {
   const row = Number(hoverTd.dataset.row);
   const col = Number(hoverTd.dataset.col);
   if (row === state.focus.row && col === state.focus.col) return;
+  leaveChart(false); // pointing at another cell means exploring the sheet again
   setFocus(row, col);
   announceFocus();
 }
@@ -725,6 +927,12 @@ document.getElementById("load-demo").addEventListener("click", () => {
   cues.unlock(); // this click is what lets the browser play sound later
   startBtn.hidden = true; // sound is unlocked now, so Start has done its job
   loadDemo();
+});
+
+document.getElementById("load-chart-demo").addEventListener("click", () => {
+  cues.unlock();
+  startBtn.hidden = true;
+  loadDemo(CHART_DEMO_URL, "sales_chart_demo.xlsx");
 });
 
 // Test switches until the visible controls exist (Phase 3):
