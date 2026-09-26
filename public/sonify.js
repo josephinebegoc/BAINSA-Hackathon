@@ -236,9 +236,30 @@ function note({ at, freq, ms, pan, wave = "triangle", gain = null }) {
 // so the caller can wait for it the way cues.play() already does.
 export function playSeries({ values, label, unit } = {}, { onDone } = {}) {
   stop();
-  if (!AudioCtx) return 0;
+  // Trend Scan failing is silent by nature, so say why in the console rather than
+  // leaving someone pressing R and hearing nothing.
+  if (!AudioCtx) {
+    console.warn("[sonify] no Web Audio in this browser");
+    return 0;
+  }
   unlock();
-  if (!ctx || !values || !values.length) return 0;
+  if (!ctx) {
+    console.warn("[sonify] could not create an audio context");
+    return 0;
+  }
+  if (!values || !values.length) {
+    console.warn("[sonify] nothing to play: values was", values);
+    return 0;
+  }
+  const playable = values.filter(isNumber).length;
+  console.info(
+    `[sonify] ${values.length} cells, ${playable} numbers, scale ${hasScale() ? "set" : "NOT SET"},` +
+    ` context ${ctx.state}`
+  );
+  if (!playable) {
+    console.warn("[sonify] none of the values are numbers, so there is nothing to sound");
+    return 0;
+  }
 
   // A context can still be "suspended" when it is created inside a key handler, and
   // resume() settles asynchronously. Notes scheduled before it settles are never
@@ -252,6 +273,9 @@ export function playSeries({ values, label, unit } = {}, { onDone } = {}) {
 }
 
 function schedule(values, onDone) {
+  if (ctx.state !== "running") {
+    console.warn(`[sonify] context is "${ctx.state}", not running: no sound will be heard`);
+  }
   const start = ctx.currentTime + 0.05;
   const last = values.length - 1;
   const pitches = frequenciesFor(values);
