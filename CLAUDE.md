@@ -343,12 +343,25 @@ touches it:
 // Fixes the pitch scale for the whole sheet, so rows can be compared by ear.
 export function setScale(allValues)
 
+// The line to speak before the tones: "Italy, January to December. €62,000 to €154,000."
+export function describe({ values, label, unit })
+
 // Play one row or column as tones. Returns how long it will take in ms, so speech
 // can wait for it the way cues.play() already does.
 export function playSeries({ values, label, unit }, { onDone } = {})
+
 export function stop()                 // Escape
+export function unlock()               // call from a click or key press, like cues.unlock()
 export function isSupported()          // false without Web Audio; app.js falls back to Concise
+export function hasScale()             // false until setScale() has been given values
 ```
+
+**sonify.js makes no speech of its own.** `app.js` announces `describe(series)` through
+`voice.js`, then calls `playSeries()` — voice belongs to `voice.js`, and the caller
+owns the timing.
+
+Entries in `values` are numbers, `null` for an empty cell, or the error code as a
+string (`"#DIV/0!"`) for an error cell, which gets its own rough low buzz.
 
 `SheetModel.series_cols` names the columns holding the sheet's main quantity, so the
 frontend never has to work out which values are comparable -- that logic lives in
