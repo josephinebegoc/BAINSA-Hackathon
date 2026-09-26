@@ -32,6 +32,20 @@ JUDGEMENT_WORDS = {
     "likely", "probably", "suspicious", "suspect", "wrong", "error-prone",
 }
 
+
+# Which models accept output_config.effort. Haiku rejects it outright, and a
+# rejected call falls back to the template -- silently, because that is what the
+# fallback is for. Keep the list explicit rather than guessing from the model name.
+EFFORT_PREFIXES = ("claude-opus-", "claude-sonnet-5", "claude-fable-", "claude-mythos-")
+
+
+def model_kwargs(model: str) -> dict:
+    """The per-model request options, so an unsupported one is never sent."""
+    if model.startswith(EFFORT_PREFIXES):
+        # A rephrasing job: keep the call inside its timeout.
+        return {"output_config": {"effort": "low"}}
+    return {}
+
 SYSTEM = """You rewrite spreadsheet facts as one or two short spoken sentences for \
 someone exploring a spreadsheet by ear.
 
@@ -174,15 +188,14 @@ def explain(request: ExplainRequest, timeout: float = 5.0) -> TextResponse:
     try:
         import anthropic
 
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
         client = anthropic.Anthropic()
         response = client.with_options(timeout=timeout).messages.create(
-            model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-5"),
+            model=model,
             max_tokens=256,
             system=SYSTEM,
-            # Low effort: this is a rephrasing job, and the whole call has to fit
-            # inside a few seconds or the listener is left waiting in silence.
-            output_config={"effort": "low"},
             messages=[{"role": "user", "content": payload}],
+            **model_kwargs(model),
         )
         text = "".join(b.text for b in response.content if b.type == "text").strip()
     except Exception:
