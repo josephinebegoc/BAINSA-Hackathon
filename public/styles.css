@@ -1,0 +1,111 @@
+:root {
+  --focus: #0050d0;
+  --grid-line: #c8c8c8;
+  --header-bg: #f1f3f5;
+  --visual: #7e22ce;
+  --anomaly: #b45309;
+  --trend: #1d4ed8;
+  --error: #b91c1c;
+}
+
+body {
+  font: 16px/1.5 system-ui, sans-serif;
+  margin: 0;
+  padding: 1.5rem;
+  color: #1a1a1a;
+}
+
+h1 { margin: 0 0 .25rem; font-size: 1.6rem; }
+.tagline { margin: 0 0 1rem; color: #444; }
+
+.controls { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+button {
+  font: inherit;
+  padding: .5rem 1rem;
+  border: 2px solid #1a1a1a;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+button:hover { background: #f1f3f5; }
+button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+#status { margin: .75rem 0; }
+
+/* ---------- Grid ---------- */
+
+#grid {
+  overflow: auto;
+  max-width: 100%;
+  border: 2px solid transparent;
+  border-radius: 4px;
+}
+#grid:focus-visible { border-color: var(--focus); outline: none; }
+
+#grid table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+#grid th {
+  background: var(--header-bg);
+  color: #555;
+  font-weight: normal;
+  font-size: .8rem;
+  padding: .2rem .5rem;
+  border: 1px solid var(--grid-line);
+}
+
+#grid td {
+  position: relative;
+  min-width: 5.5rem;
+  padding: .4rem .6rem;
+  border: 1px solid var(--grid-line);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#grid td.header { background: var(--header-bg); font-weight: 600; }
+#grid td.label  { font-weight: 600; }
+#grid td.bold   { font-weight: 700; }
+#grid td.number { text-align: right; }
+#grid td.error  { color: var(--error); font-weight: 700; }
+#grid td.dark-fill { color: #fff; }
+#grid td.fill-unknown {
+  background: repeating-linear-gradient(45deg, #eee 0 6px, #ddd 6px 12px);
+}
+
+/* The focused cell: strong outline, visible from across the room. */
+#grid td.focused {
+  outline: 4px solid var(--focus);
+  outline-offset: -2px;
+  z-index: 1;
+}
+
+/* ---------- Signal markers ---------- */
+
+.markers {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  display: flex;
+  gap: 1px;
+}
+
+.marker {
+  display: inline-block;
+  min-width: 1rem;
+  padding: 0 .2rem;
+  font-size: .65rem;
+  font-weight: 700;
+  line-height: 1rem;
+  text-align: center;
+  color: #fff;
+  border: 1px solid #fff;
+  border-radius: 3px;
+}
+.marker-visual  { background: var(--visual); }
+.marker-anomaly { background: var(--anomaly); }
+.marker-trend   { background: var(--trend); }
+.marker-error   { background: var(--error); }
