@@ -397,7 +397,13 @@ function describeCell(row, col) {
   }
   if (looks.length) parts.push(sentenceCase(looks.join(", ")));
 
-  return [...signals.map((s) => cueWithFact(s, cell)), ...parts].join(". ") + ".";
+  const cueFacts = signals.map((s) => cueWithFact(s, cell));
+  const mismatch = formatMismatch(row, col);
+  if (mismatch) {
+    cueFacts.push(mismatch.alert);
+    if (mismatch.stored) parts.push(mismatch.stored);
+  }
+  return [...cueFacts, ...parts].join(". ") + ".";
 }
 
 // "Pattern cue: Falls 60% after 6 months of rises". The engine's detail is a
@@ -409,6 +415,51 @@ function cueWithFact(signal, cell) {
   const fact = (signal.detail || "").trim().replace(/\.$/, "");
   if (!fact || (signal.type === "error" && cell?.error)) return name;
   return `${name}: ${fact}`;
+}
+
+// ---------- Number formats that don't match their row ----------
+// September formatted as a percentage among months shown in euros reads as
+// "6,900,000.0%". A sighted reader would spot that the column looks different;
+// we say so on every cell of it, as facts. Only the columns Margaux's engine
+// names as comparable (series_cols) are compared, so a growth ratio is never
+// measured against sales. No series_cols, no alert: we don't guess.
+
+const FORMAT_WORDS = { percent: "a percentage", currency: "currency", plain: "a plain number" };
+const CURRENCY_WORDS = { "€": "euros", "$": "dollars", "£": "pounds", "¥": "yen" };
+
+// "percent", "currency" or "plain" for a numeric cell; null otherwise.
+function formatKind(cell) {
+  if (typeof cell?.value !== "number") return null;
+  const format = cell.number_format || "General";
+  if (format.includes("%")) return "percent";
+  if (/[€$£¥]|\[\$/.test(format)) return "currency";
+  return "plain";
+}
+
+// { alert, stored } when this cell's format differs from most of its row, or null.
+function formatMismatch(row, col) {
+  const series = state.sheet.series_cols || [];
+  if (row === state.sheet.header_row || !series.includes(col)) return null;
+  const cell = cellAt(row, col);
+  const kind = formatKind(cell);
+  if (!kind) return null;
+
+  const others = series.filter((c) => c !== col).map((c) => cellAt(row, c)).filter(formatKind);
+  const counts = {};
+  for (const other of others) counts[formatKind(other)] = (counts[formatKind(other)] || 0) + 1;
+  const [usual, howMany] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
+  // Only when most of the row clearly agrees on something else.
+  if (!usual || usual === kind || howMany <= others.length / 2) return null;
+
+  const example = others.find((other) => formatKind(other) === usual);
+  const symbol = example.display.match(/[€$£¥]/)?.[0];
+  const theirs = usual === "currency" ? CURRENCY_WORDS[symbol] || "currency" : FORMAT_WORDS[usual];
+  // The stored number only adds something when the format hides it (6,900,000.0%).
+  const stored = cell.value.toLocaleString("en-US");
+  return {
+    alert: `Format differs from the rest of the row: shown as ${FORMAT_WORDS[kind]} while the others show ${theirs}`,
+    stored: cell.display === stored ? null : `The number stored is ${stored}`,
+  };
 }
 
 // ---------- What it looks like (the author's visual vocabulary) ----------
@@ -489,7 +540,8 @@ function spokenFormula(formula) {
 // Flagged cells interrupt politely-queued output.
 function announceFocus(prefix = "") {
   const { row, col } = state.focus;
-  const type = topSignal(cellAt(row, col));
+  // A format mismatch gets the same "something here" chime as a flagged cell.
+  const type = topSignal(cellAt(row, col)) || (formatMismatch(row, col) ? "visual" : null);
   const soundMs = cues.play(type || "tick");
   voice.announce(prefix + describeCell(row, col), {
     priority: type ? "assertive" : "polite",
@@ -640,6 +692,9 @@ function describeFocus() {
   else out.push(`Shows ${cell.display}`);
 
   if (cell?.formula) out.push(`Calculated by the formula ${spokenFormula(cell.formula)}`);
+
+  const mismatch = formatMismatch(row, col);
+  if (mismatch) out.push(...[mismatch.alert, mismatch.stored].filter(Boolean));
 
   const looks = formattingWords(row, col, cell, { everything: true });
   out.push(looks.length ? `Formatting: ${looks.join(", ")}` : "No special formatting");
