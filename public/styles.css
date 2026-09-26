@@ -31,6 +31,16 @@ button {
 button:hover { background: #f1f3f5; }
 button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 
+/* Start: the first thing on the page, big enough to find without looking. */
+button.primary {
+  padding: .9rem 2.5rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  background: #1a1a1a;
+  color: #fff;
+}
+button.primary:hover { background: #333; }
+
 #status { margin: .75rem 0; }
 
 /* Readable by screen readers, invisible on screen. */

@@ -51,6 +51,7 @@ const state = {
 const gridEl = document.getElementById("grid");
 const statusEl = document.getElementById("status");
 const titleEl = document.getElementById("sheet-title");
+const startBtn = document.getElementById("start");
 
 // ---------- Loading ----------
 
@@ -80,19 +81,17 @@ function showSheet(sheet) {
   // Start on the first data cell, just below the header and right of the labels.
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
-  voice.announce(`${sheet.title} loaded. ${flaggedSummary()}`);
+  // ORIENT: an instant spoken overview whenever a sheet opens.
+  voice.announce(orientation());
 }
 
-function flaggedSummary() {
-  const count = state.sheet.attention_order.length;
-  if (count === 0) {
-    return "No cells flagged. Press O for an overview, or H for help.";
-  }
-  const cells = count === 1 ? "1 cell flagged" : `${count} cells flagged`;
-  return (
-    `${cells}. Press Space to go to the first one, N for the next, ` +
-    "O for an overview, or H for help."
-  );
+// The overview, then what the user can do next.
+function orientation() {
+  const overview = state.sheet.overview || `${state.sheet.title}.`;
+  const next = state.sheet.attention_order.length
+    ? "Press Space to go to the first flagged cell, use the arrow keys to explore, or press H for help."
+    : "Use the arrow keys to explore, or press H for help.";
+  return `${overview} ${next}`;
 }
 
 // ---------- Rendering ----------
@@ -305,9 +304,10 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "F3. Italy in May: €31,000. Statistical cue."
-// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy in May: …"
-function describeCell(row, col, { cueFirst = false } = {}) {
+// "Author visual cue. D5. Spain's sales in March are €63,400. Highlighted red."
+// The cue name comes first, so the listener knows what kind of cell this is
+// before hearing its value.
+function describeCell(row, col) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
 
@@ -326,8 +326,7 @@ function describeCell(row, col, { cueFirst = false } = {}) {
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
   const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
-  const ordered = cueFirst ? [...cueNames, ...parts] : [...parts, ...cueNames];
-  return ordered.join(". ") + ".";
+  return [...cueNames, ...parts].join(". ") + ".";
 }
 
 // ---------- What it looks like (the author's visual vocabulary) ----------
@@ -406,11 +405,11 @@ function spokenFormula(formula) {
 
 // The cue's sound plays first; speech waits until it has finished.
 // Flagged cells interrupt politely-queued output.
-function announceFocus(prefix = "", { cueFirst = false } = {}) {
+function announceFocus(prefix = "") {
   const { row, col } = state.focus;
   const type = topSignal(cellAt(row, col));
   const soundMs = cues.play(type || "tick");
-  voice.announce(prefix + describeCell(row, col, { cueFirst }), {
+  voice.announce(prefix + describeCell(row, col), {
     priority: type ? "assertive" : "polite",
     delay: soundMs,
   });
@@ -596,13 +595,28 @@ function announceHover() {
   const col = Number(hoverTd.dataset.col);
   if (row === state.focus.row && col === state.focus.col) return;
   setFocus(row, col);
-  // Someone sweeping the mouse hears the cue type first, so they know to stop.
-  announceFocus("", { cueFirst: true });
+  announceFocus();
 }
+
+// Start: the click that lets the browser play sound and speech. It opens the
+// demo sheet (unless one is already showing) and speaks its overview.
+startBtn.addEventListener("click", () => {
+  cues.unlock();
+  startBtn.hidden = true;
+  if (state.sheet) {
+    gridEl.focus();
+    voice.announce(orientation());
+    return;
+  }
+  // Speaking inside the click is what unlocks speech on iPhones and iPads.
+  voice.announce("Loading the sample sheet.");
+  loadFixture();
+});
 
 document.getElementById("load-demo").addEventListener("click", () => {
   // Phase 2 switches this to /demo/sales_demo.xlsx → /api/upload.
   cues.unlock(); // this click is what lets the browser play sound later
+  startBtn.hidden = true; // sound is unlocked now, so Start has done its job
   loadFixture();
 });
 
