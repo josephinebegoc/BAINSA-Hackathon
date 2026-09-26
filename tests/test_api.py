@@ -46,12 +46,13 @@ def test_upload_returns_a_usable_sheet_model(client):
 
 
 def test_upload_finds_the_planted_cues(client):
-    """The author's own Team Guide says F5, I2 and N6 (D4 is the statistical cue)."""
+    """All four the author's own Team Guide lists: F5, D4, I2 and N6."""
     body = upload(client).json()
-    assert set(body["attention_order"]) == {"F5", "I2", "N6"}
+    assert set(body["attention_order"]) == {"F5", "D4", "I2", "N6"}
     kinds = {c["ref"]: {s["type"] for s in c["signals"]}
              for c in body["cells"] if c["signals"]}
     assert kinds["F5"] == {"visual"}
+    assert kinds["D4"] == {"anomaly"}
     assert kinds["I2"] == {"trend"}
     assert kinds["N6"] == {"error"}
 
@@ -59,7 +60,7 @@ def test_upload_finds_the_planted_cues(client):
 def test_upload_speaks_an_overview_without_an_llm(client):
     body = upload(client).json()
     assert body["overview"].startswith("European Sales 2026.")
-    assert "3 cells flagged" in body["overview"]
+    assert "4 cells flagged" in body["overview"]
 
 
 def test_upload_reads_the_value_label_from_the_sheet(client):

@@ -296,18 +296,17 @@ def find_signals(
     label_col: int = 1,
     orientation: str = "row",
     step_word: str | None = None,
-    include_statistical: bool = False,
+    include_statistical: bool = True,
 ) -> dict[str, list[Signal]]:
     """All signals for a sheet, keyed by cell ref.
 
     `orientation` is "row" (default), "col", or "both". Use "col" when the sheet
     reads down the page -- when the row labels are the time periods.
 
-    `include_statistical` is off by default. The statistical cue ("148% above the
-    row median") is us computing a judgement about a value rather than reporting
-    something that is there, so it is not part of what we announce. The rule is kept
-    and still tested, because the decision was "for now" -- turning it back on is
-    this one flag.
+    `include_statistical` controls the statistical cue ("148% above the row median").
+    It is on, and it is the one cue that reports a comparison we computed rather than
+    something written in the sheet -- which is why the wording stays strictly factual
+    and why it can be switched off in one place if that judgement changes again.
     """
     body = [c for c in cells if c.row != header_row and c.col != label_col]
     found: dict[str, list[Signal]] = defaultdict(list)

@@ -61,15 +61,15 @@ statistics. Keep this vocabulary in the pitch and the UI:
 | Cue | Signal `type` | Sounds like | Status |
 |---|---|---|---|
 | **Author visual cue** | `visual` | "The author highlighted this red." | announced |
+| **Statistical cue** | `anomaly` | "61% below Italy's median." | announced |
 | **Pattern cue** | `trend` | "Falls 45% after four months of rises." | announced |
 | **Functional cue** | `error` | "This cell contains a division-by-zero error." | announced |
-| **Statistical cue** | `anomaly` | "61% below Italy's median." | **off for now** |
 
-**The statistical cue is switched off.** Saying a value is far from its median is us
-computing a judgement about it, not reporting something that is in the sheet. The
-rule is kept and still tested; `find_signals(..., include_statistical=True)` turns it
-back on, and that one flag is the whole change. Decided by Margaux; revisit if the
-pitch needs it.
+All four are announced. The statistical cue is the only one reporting a comparison
+we computed rather than something written in the sheet, so its wording stays strictly
+factual -- a distance from the median, never "unusually low" -- and it remains
+switchable in one place, `find_signals(..., include_statistical=False)`, if that
+judgement changes again.
 
 Note the phrasing: each one states what is there, not what to think about it. "This
 value is unusually low" would be us doing the analysing.
@@ -233,7 +233,7 @@ Pure functions with no I/O, fully unit-tested. Four signal types:
 | Type | Rule (prototype) | Example detail |
 |---|---|---|
 | `visual` | non-default solid fill, or red/orange font; bold only if the rest of the row isn't bold | "Author highlighted this cell in red" |
-| `anomaly` | **Off by default.** Within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median; distance from the median alone only when the spread is too degenerate for a z-score. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
+| `anomaly` | Within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median; distance from the median alone only when the spread is too degenerate for a z-score. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
 | `trend` | at least 3 consecutive increases (or decreases) followed by a move in the opposite direction larger than 25% | "Breaks a 4-month upward trend" |
 | `error` | cell holds an Excel error value | "Formula error: division by zero" |
 

@@ -52,22 +52,12 @@ def test_engine_reproduces_the_attention_order():
     assert order == sheet.attention_order
 
 
-def test_the_announced_cue_types_are_present_and_nothing_else_is_flagged():
-    """The cues we actually announce, and only those."""
+def test_all_four_cue_types_are_present_and_nothing_else_is_flagged():
+    """The four planted moments, and only those four."""
     sheet = load()
     cells, _ = derive(sheet)
     flagged = {c.ref: {s.type for s in c.signals} for c in cells if c.signals}
-    assert len(flagged) == 3
+    assert len(flagged) == 4
     assert {t for types in flagged.values() for t in types} == {
-        "visual", "trend", "error"
+        "visual", "anomaly", "trend", "error"
     }
-
-
-def test_the_statistical_cue_would_still_fire_if_switched_on():
-    """The planted anomaly is still detectable; we just do not announce it."""
-    sheet = load()
-    cells = [c.model_copy(update={"signals": []}) for c in sheet.cells]
-    found = attention.find_signals(cells, header_row=sheet.header_row,
-                                   label_col=sheet.label_col, step_word="month",
-                                   include_statistical=True)
-    assert any(s.type == "anomaly" for sigs in found.values() for s in sigs)
