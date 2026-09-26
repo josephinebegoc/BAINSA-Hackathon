@@ -28,9 +28,11 @@ from fastapi import FastAPI, File, UploadFile  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 from _lib import attention  # noqa: E402
+from _lib.explain import explain as explain_cell  # noqa: E402
+from _lib.explain import template as explain_template  # noqa: E402
 from _lib.extract import extract  # noqa: E402
-from _lib.models import HealthResponse, SheetModel  # noqa: E402
-from _lib.overview import overview_for  # noqa: E402
+from _lib.models import ExplainRequest, HealthResponse, OverviewFacts, TextResponse  # noqa: E402
+from _lib.overview import overview_for, polish_overview  # noqa: E402
 
 # Vercel rejects request bodies over about 4.5 MB before our code ever runs, so
 # say something useful a little before that rather than letting it fail opaquely.
@@ -131,3 +133,29 @@ async def upload(file: UploadFile = File(...)):
 def upload_hint():
     """A GET here is almost always someone testing the URL by hand."""
     return _spoken_error("Send a spreadsheet to this address with a POST request.", 405)
+
+
+@app.post("/api/explain", response_model=TextResponse)
+def explain(request: ExplainRequest) -> TextResponse:
+    """UNDERSTAND: why this cell was flagged, in a sentence or two.
+
+    The browser already holds the SheetModel, so it sends the one cell and its row
+    context. Falls back to the template on any failure, including no API key.
+    """
+    try:
+        return explain_cell(request)
+    except Exception:
+        try:
+            return TextResponse(text=explain_template(request), source="template")
+        except Exception:
+            return TextResponse(text="I cannot explain this cell.", source="template")
+
+
+@app.post("/api/overview", response_model=TextResponse)
+def overview(facts: OverviewFacts) -> TextResponse:
+    """ORIENT, polished. The browser already has the template version from upload
+    and swaps this in only if it arrives in time."""
+    try:
+        return polish_overview(facts)
+    except Exception:
+        return TextResponse(text="", source="template")

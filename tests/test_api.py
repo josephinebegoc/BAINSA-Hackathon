@@ -93,3 +93,69 @@ def test_an_oversized_file_says_so_in_megabytes(client):
 
 def test_a_get_by_hand_explains_itself(client):
     assert client.get("/api/upload").status_code == 405
+
+
+# --- explain -----------------------------------------------------------------
+
+def _cell_and_row(client, ref):
+    sheet = upload(client).json()
+    cell = next(c for c in sheet["cells"] if c["ref"] == ref)
+    row = [c["value"] for c in sheet["cells"] if c["row"] == cell["row"] and c["col"] != 1]
+    return {"cell": cell, "row_values": row, "signals": cell["signals"]}
+
+
+@pytest.mark.parametrize("ref,words", [
+    ("F5", "highlighted"),
+    ("I2", "after 6 months of rises"),
+    ("N6", "division by zero"),
+])
+def test_explain_states_the_fact(client, ref, words):
+    body = client.post("/api/explain", json=_cell_and_row(client, ref)).json()
+    assert words in body["text"]
+    assert body["source"] in ("llm", "template")
+
+
+def test_explain_row_context_stays_like_for_like(client):
+    """The row holds a growth ratio as well as revenue. Saying the row runs from
+    -0 to 154,000 would be worse than saying nothing."""
+    body = client.post("/api/explain", json=_cell_and_row(client, "I2")).json()
+    assert "run from 69,000 to 154,000" in body["text"]
+
+
+def test_explain_never_editorialises(client):
+    from _lib.explain import JUDGEMENT_WORDS
+    for ref in ("F5", "I2", "N6"):
+        text = client.post("/api/explain", json=_cell_and_row(client, ref)).json()["text"]
+        assert not set(text.lower().split()) & JUDGEMENT_WORDS
+
+
+def test_explain_handles_a_cell_with_no_cues(client):
+    body = client.post("/api/explain", json=_cell_and_row(client, "B3")).json()
+    assert "No cues" in body["text"]
+
+
+def test_explain_survives_a_nearly_empty_request(client):
+    body = client.post("/api/explain", json={"cell": {"ref": "A1", "row": 1, "col": 1}}).json()
+    assert body["text"]
+
+
+def test_the_llm_guard_rejects_opinions_and_invented_numbers():
+    from _lib.explain import _acceptable
+    facts = "Falls 60% after 6 months of rises 62000"
+    assert _acceptable("Italy fell to 62,000 in August after six months of rises.", facts)
+    assert not _acceptable("A concerning drop you should investigate.", facts)
+    assert not _acceptable("It fell by 88 percent.", facts)
+    assert not _acceptable("**Italy** fell in August.", facts)
+
+
+def test_overview_endpoint_falls_back_to_the_template(client):
+    sheet = upload(client).json()
+    body = client.post("/api/overview", json={
+        "title": sheet["title"], "value_label": sheet["value_label"],
+        "n_data_rows": 8, "n_cols": 14,
+        "first_col_header": "Country", "last_col_header": "Growth vs Jan",
+        "first_value": "€97,000", "first_value_header": "Jan",
+        "last_value": "177,000", "last_value_header": "Dec",
+        "signal_counts": {"visual": 1, "trend": 1, "error": 1},
+    }).json()
+    assert body["text"].startswith("European Sales 2026.")
