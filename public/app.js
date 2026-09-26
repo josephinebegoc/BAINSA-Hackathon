@@ -38,20 +38,25 @@ const ERROR_WORDS = {
 };
 
 // Said (or shown) as the page opens, before any key has been pressed.
-const OPENING = "Press any key to start, or L to load the demo.";
+const OPENING =
+  "Press any key to start, L to load the demo, or U to upload your own spreadsheet.";
 // Said once the first key, click or tap has turned sound on.
 const WELCOME =
-  "Welcome. Press L, or the Load demo button at the top of the page, " +
-  "to open the demo sheet. Press H for help.";
+  "Welcome. Press L to open the demo sheet, or U to upload your own spreadsheet. " +
+  "Both buttons are also at the top of the page. Press H for help.";
 // Keys that still work before a sheet is open.
-const KEYS_WITHOUT_SHEET = new Set(["l", "h", "Escape"]);
+const KEYS_WITHOUT_SHEET = new Set(["l", "u", "h", "Escape"]);
+// Vercel rejects bodies over about 4.5 MB before the server sees them, so we
+// check first and say so, rather than failing with no explanation.
+const MAX_UPLOAD_BYTES = 4_000_000;
 
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
   "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
-  "R reads the whole row, C the whole column. L loads the demo sheet again. " +
+  "R reads the whole row, C the whole column. L loads the demo sheet. " +
+  "U uploads your own spreadsheet. " +
   "Escape stops speaking.";
 
 // Hovering announces the cell under the mouse, at most this often.
@@ -694,6 +699,7 @@ const KEY_ACTIONS = {
   "?": explainFocus,
   d: describeFocus,
   l: () => startLoadingDemo(),
+  u: () => chooseFile(),
   r: readRow,
   c: readColumn,
   h: () => voice.announce(HELP_TEXT),
@@ -773,7 +779,9 @@ document.addEventListener(
     event.preventDefault(); // this key only starts; it doesn't also act on the grid
     event.stopPropagation();
     // L goes straight to the demo; any other key starts with the welcome.
-    if (event.key.toLowerCase() === "l") startLoadingDemo();
+    const key = event.key.toLowerCase();
+    if (key === "l") startLoadingDemo();
+    else if (key === "u") chooseFile();
     else startBtn.click();
   },
   { capture: true }
@@ -789,6 +797,51 @@ function startLoadingDemo() {
 }
 
 document.getElementById("load-demo").addEventListener("click", startLoadingDemo);
+
+// ---------- Upload your own spreadsheet ----------
+
+const fileInput = document.getElementById("file-input");
+
+// U, or the Upload button: open the browser's file picker.
+function chooseFile() {
+  cues.unlock();
+  startBtn.hidden = true;
+  document.title = "Accessible Attention for Excel";
+  voice.announce("Choose an Excel file.");
+  fileInput.value = ""; // so choosing the same file again still counts
+  fileInput.click();
+}
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files[0];
+  if (file) uploadOwnFile(file);
+});
+// Closing the picker without choosing (supported in recent browsers).
+fileInput.addEventListener("cancel", () => voice.announce("No file chosen."));
+
+async function uploadOwnFile(file) {
+  // Checked here too so the answer is instant and doesn't depend on the network.
+  if (!/\.(xlsx|xlsm)$/i.test(file.name)) {
+    sayProblem("That file is not an Excel workbook. Please choose an .xlsx file.");
+    return;
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    const megabytes = Math.round(file.size / 1_000_000);
+    sayProblem(`That file is ${megabytes} megabytes, which is too large. The limit is about 4 megabytes.`);
+    return;
+  }
+  const name = file.name.replace(/\.(xlsx|xlsm)$/i, "");
+  statusEl.textContent = `Opening ${name}…`;
+  voice.announce(`Opening ${name}.`);
+  const reached = await uploadWorkbook(file, file.name);
+  // Unlike the demo, there is no offline copy of the user's own file.
+  if (!reached) sayProblem("I couldn't reach the server, so I can't open your file right now. Please try again.");
+}
+
+function sayProblem(message) {
+  statusEl.textContent = message;
+  voice.announce(message);
+}
 
 // Test switches until the visible controls exist (Phase 3):
 // ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate,
