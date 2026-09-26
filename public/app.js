@@ -34,9 +34,13 @@ const ERROR_WORDS = {
 
 const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
+  "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
   "W explains why a cell was flagged. " +
   "R reads the whole row, C the whole column. Escape stops speaking.";
+
+// Hovering announces the cell under the mouse, at most this often.
+const HOVER_THROTTLE_MS = 150;
 
 const state = {
   sheet: null,
@@ -74,8 +78,18 @@ function showSheet(sheet) {
   // Start on the first data cell, just below the header and right of the labels.
   setFocus(sheet.header_row + 1, sheet.label_col + 1);
   gridEl.focus();
-  voice.announce(
-    `${sheet.title} loaded. Press O for an overview, N for flagged cells, or H for help.`
+  voice.announce(`${sheet.title} loaded. ${flaggedSummary()}`);
+}
+
+function flaggedSummary() {
+  const count = state.sheet.attention_order.length;
+  if (count === 0) {
+    return "No cells flagged. Press O for an overview, or H for help.";
+  }
+  const cells = count === 1 ? "1 cell flagged" : `${count} cells flagged`;
+  return (
+    `${cells}. Press Space to go to the first one, N for the next, ` +
+    "O for an overview, or H for help."
   );
 }
 
@@ -222,7 +236,8 @@ function topSignal(cell) {
 }
 
 // "F3. Italy. May. €31,000. Statistical cue."
-function describeCell(row, col) {
+// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy. …"
+function describeCell(row, col, { cueFirst = false } = {}) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
 
@@ -239,17 +254,20 @@ function describeCell(row, col) {
   }
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
-  parts.push(...types.map((t) => SIGNAL_NAMES[t] || t));
-  return parts.join(". ") + ".";
+  const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
+  const ordered = cueFirst ? [...cueNames, ...parts] : [...parts, ...cueNames];
+  return ordered.join(". ") + ".";
 }
 
-// Cue first, then speech. Flagged cells interrupt politely-queued output.
-function announceFocus(prefix = "") {
+// The cue's sound plays first; speech waits until it has finished.
+// Flagged cells interrupt politely-queued output.
+function announceFocus(prefix = "", { cueFirst = false } = {}) {
   const { row, col } = state.focus;
   const type = topSignal(cellAt(row, col));
-  cues.play(type || "tick");
-  voice.announce(prefix + describeCell(row, col), {
+  const soundMs = cues.play(type || "tick");
+  voice.announce(prefix + describeCell(row, col, { cueFirst }), {
     priority: type ? "assertive" : "polite",
+    delay: soundMs,
   });
 }
 
@@ -278,8 +296,20 @@ function jumpToFlagged(step) {
   let i = order.indexOf(here);
   // Not on a flagged cell: N goes to the first, Shift+N to the last.
   if (i === -1) i = step > 0 ? -1 : 0;
-  i = (i + step + order.length) % order.length;
+  goToFlagged((i + step + order.length) % order.length);
+}
 
+// Space: straight to the first flagged cell.
+function jumpToFirstFlagged() {
+  if (!state.sheet.attention_order.length) {
+    voice.announce("Nothing in this sheet was flagged.");
+    return;
+  }
+  goToFlagged(0);
+}
+
+function goToFlagged(i) {
+  const order = state.sheet.attention_order;
   const cell = state.cellsByRef.get(order[i]);
   if (!cell) return;
   setFocus(cell.row, cell.col);
@@ -345,6 +375,7 @@ const KEY_ACTIONS = {
   ArrowDown: () => move(1, 0),
   ArrowLeft: () => move(0, -1),
   ArrowRight: () => move(0, 1),
+  " ": jumpToFirstFlagged,
   n: (event) => jumpToFlagged(event.shiftKey ? -1 : 1),
   o: speakOverview,
   w: explainFocus,
@@ -358,6 +389,7 @@ const KEY_ACTIONS = {
 gridEl.addEventListener("keydown", (event) => {
   // Leave browser shortcuts like Cmd+R alone.
   if (!state.sheet || event.ctrlKey || event.metaKey || event.altKey) return;
+  cues.unlock();
   const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const action = KEY_ACTIONS[key];
   if (!action) return;
@@ -368,16 +400,47 @@ gridEl.addEventListener("keydown", (event) => {
 gridEl.addEventListener("click", (event) => {
   const td = event.target.closest("td[data-row]");
   if (!td || !state.sheet) return;
+  cues.unlock();
   setFocus(Number(td.dataset.row), Number(td.dataset.col));
   gridEl.focus();
   announceFocus();
 });
 
+// Hovering with a mouse announces the cell under the pointer (EXPLORE), and a
+// flagged cell plays its cue first (NOTICE). Throttled, and silent until the
+// pointer reaches a different cell. Touch comes later.
+let hoverTd = null;
+let hoverTimer = null;
+
+gridEl.addEventListener("pointermove", (event) => {
+  if (!state.sheet || event.pointerType === "touch") return;
+  hoverTd = event.target.closest("td[data-row]");
+  if (!hoverTimer) hoverTimer = setTimeout(announceHover, HOVER_THROTTLE_MS);
+});
+
+function announceHover() {
+  hoverTimer = null;
+  if (!hoverTd) return;
+  const row = Number(hoverTd.dataset.row);
+  const col = Number(hoverTd.dataset.col);
+  if (row === state.focus.row && col === state.focus.col) return;
+  setFocus(row, col);
+  // Someone sweeping the mouse hears the cue type first, so they know to stop.
+  announceFocus("", { cueFirst: true });
+}
+
 document.getElementById("load-demo").addEventListener("click", () => {
   // Phase 2 switches this to /demo/sales_demo.xlsx → /api/upload.
+  cues.unlock(); // this click is what lets the browser play sound later
   loadFixture();
 });
 
-if (new URLSearchParams(location.search).has("fixture")) {
+// Test switches until the visible controls exist (Phase 3):
+// ?sr=1 uses screen-reader mode, ?rate=1.5 sets the speaking rate.
+const params = new URLSearchParams(location.search);
+if (params.has("sr")) voice.setMode("sr");
+if (params.has("rate")) voice.setRate(Number(params.get("rate")));
+
+if (params.has("fixture")) {
   loadFixture();
 }
