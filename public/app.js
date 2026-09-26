@@ -72,7 +72,9 @@ function showSheet(sheet) {
 
   titleEl.textContent = sheet.title;
   titleEl.hidden = false;
-  statusEl.textContent = `${sheet.title} loaded. ${sheet.attention_order.length} cells flagged.`;
+  statusEl.textContent =
+    `${sheet.title} loaded. ${sheet.attention_order.length} cells flagged. ` +
+    `Voice: ${voice.getVoiceName()}.`;
 
   renderGrid();
   // Start on the first data cell, just below the header and right of the labels.
@@ -215,6 +217,74 @@ function setFocus(row, col) {
 
 // ---------- What we say (EXPLORE) ----------
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const MONTH_PATTERN =
+  /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?(?:[\s\-'/]+(\d{2,4}))?$/i;
+
+// If a header names a moment in time, say it in full: "Nov" → "November",
+// "Jan 2026" → "January 2026", "q3" → "Q3". Otherwise return null.
+function timePhrase(text) {
+  const t = (text || "").trim();
+  const month = t.match(MONTH_PATTERN);
+  if (month) {
+    const name = MONTHS.find((m) => m.toLowerCase().startsWith(month[1].slice(0, 3).toLowerCase()));
+    return month[2] ? `${name} ${month[2]}` : name;
+  }
+  if (/^(q[1-4]|h[12])(\s+\d{4})?$/i.test(t)) return t.toUpperCase();
+  if (/^(19|20)\d{2}$/.test(t)) return t;
+  return null;
+}
+
+// Headers as spoken: month names in full, everything else as written.
+function spokenHeader(text) {
+  return timePhrase(text) || text;
+}
+
+// "France" → "France's", "Netherlands" → "Netherlands'"
+function possessive(name) {
+  return /s$/i.test(name) ? `${name}'` : `${name}'s`;
+}
+
+// "revenue is", "sales are"
+function verbFor(noun) {
+  return /[^s]s$/i.test(noun.trim()) ? "are" : "is";
+}
+
+// Row and column context as one phrase, using only words the sheet contains:
+//   "France in November: €82,400"            (column is a time)
+//   "France's revenue in November is €82,400" (if the backend names the values)
+//   "Belgium's Growth % is 5.3%"              (column is not a time)
+//   "Revenue in January is €80,000"           (rows are times: column-oriented)
+function contextPhrase(label, header, cell) {
+  const value = spokenValue(cell);
+  const labelTime = timePhrase(label);
+  const headerTime = timePhrase(header);
+  // What the numbers are, e.g. "revenue". Not in the contract yet: ask Margaux.
+  const measure = state.sheet.value_label;
+
+  let subject = label || header || "";
+  let noun = null; // the word "is"/"are" agrees with; none means use a colon
+  if (label && headerTime && !labelTime) {
+    subject = measure ? `${possessive(label)} ${measure} in ${headerTime}` : `${label} in ${headerTime}`;
+    noun = measure || null;
+  } else if (header && labelTime && !headerTime) {
+    subject = `${header} in ${labelTime}`;
+    noun = header;
+  } else if (label && header) {
+    subject = `${possessive(label)} ${spokenHeader(header)}`;
+    noun = header;
+  }
+
+  if (!subject) return value;
+  if (cell?.error) {
+    return `${subject} has an error: ${value.charAt(0).toLowerCase()}${value.slice(1)}`;
+  }
+  return noun ? `${subject} ${verbFor(noun)} ${value}` : `${subject}: ${value}`;
+}
+
 function rowLabel(row) {
   return cellAt(row, state.sheet.label_col)?.display || "";
 }
@@ -235,22 +305,20 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "F3. Italy. May. €31,000. Statistical cue."
-// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy. …"
+// "F3. Italy in May: €31,000. Statistical cue."
+// cueFirst puts the cue name at the start: "Statistical cue. F3. Italy in May: …"
 function describeCell(row, col, { cueFirst = false } = {}) {
   const cell = cellAt(row, col);
   const parts = [columnLetter(col) + row];
 
   if (row === state.sheet.header_row) {
-    parts.push("Column header", spokenValue(cell));
+    parts.push("Column header", cell?.error ? spokenValue(cell) : spokenHeader(spokenValue(cell)));
   } else if (col === state.sheet.label_col) {
     parts.push("Row label", spokenValue(cell));
   } else {
     const label = cell?.row_label || rowLabel(row);
     const header = cell?.col_header || colHeader(col);
-    if (label) parts.push(label);
-    if (header) parts.push(header);
-    parts.push(spokenValue(cell));
+    parts.push(contextPhrase(label, header, cell));
   }
 
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
@@ -345,7 +413,7 @@ function readRow() {
     const cell = cellAt(row, col);
     if (col === label_col) continue;
     const header = row === header_row ? "" : colHeader(col);
-    parts.push(header ? `${header}, ${spokenValue(cell)}` : spokenValue(cell));
+    parts.push(header ? `${spokenHeader(header)}, ${spokenValue(cell)}` : spokenValue(cell));
   }
   const label = rowLabel(row) || `Row ${row}`;
   const empty = parts.every((p) => p.endsWith("blank"));
@@ -361,9 +429,9 @@ function readColumn() {
     const cell = cellAt(row, col);
     if (row === header_row) continue;
     const label = col === label_col ? "" : rowLabel(row);
-    parts.push(label ? `${label}, ${spokenValue(cell)}` : spokenValue(cell));
+    parts.push(label ? `${spokenHeader(label)}, ${spokenValue(cell)}` : spokenValue(cell));
   }
-  const header = colHeader(col) || `Column ${columnLetter(col)}`;
+  const header = spokenHeader(colHeader(col)) || `Column ${columnLetter(col)}`;
   const empty = parts.every((p) => p.endsWith("blank"));
   voice.announce(empty ? `${header}. Empty column.` : `${header}. ${parts.join(". ")}.`);
 }
