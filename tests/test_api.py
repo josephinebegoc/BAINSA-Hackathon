@@ -160,3 +160,39 @@ def test_overview_endpoint_falls_back_to_the_template(client):
         "signal_counts": {"visual": 1, "trend": 1, "error": 1},
     }).json()
     assert body["text"].startswith("European Sales 2026.")
+
+
+# --- how it sounds -----------------------------------------------------------
+
+def test_month_abbreviations_are_spoken_in_full():
+    """"Aug" is a noise in several voices. The grid still shows what the sheet wrote."""
+    from _lib.explain import spoken_header
+    assert spoken_header("Aug") == "August"
+    assert spoken_header("sept.") == "September"
+    assert spoken_header("Growth vs Jan") == "Growth vs Jan"   # not a bare month
+    assert spoken_header(None) == ""
+
+
+def test_the_row_label_is_not_said_twice():
+    """"Germany, Mar. 148% above Germany's median" names Germany twice."""
+    from _lib.explain import template
+    from _lib.models import Cell, ExplainRequest, Signal
+    request = ExplainRequest(
+        cell=Cell(ref="D4", row=4, col=4, value=390000, display="€390,000",
+                  row_label="Germany", col_header="Mar"),
+        signals=[Signal(type="anomaly", severity="medium",
+                        detail="148% above Germany's median")])
+    text = template(request)
+    assert text.lower().count("germany") == 1
+    assert text.startswith("March.")
+
+
+def test_the_prefix_survives_when_the_cue_does_not_name_the_row():
+    from _lib.explain import template
+    from _lib.models import Cell, ExplainRequest, Signal
+    request = ExplainRequest(
+        cell=Cell(ref="I2", row=2, col=9, value=62000, display="€62,000",
+                  row_label="Italy", col_header="Aug"),
+        signals=[Signal(type="trend", severity="medium",
+                        detail="Falls 60% after 6 months of rises")])
+    assert template(request).startswith("Italy, August.")
