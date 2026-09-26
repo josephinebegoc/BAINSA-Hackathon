@@ -16,6 +16,7 @@ import os
 import re
 import statistics
 
+from .attention import unit_of
 from .models import ExplainRequest, TextResponse
 
 # Words that turn a fact into an opinion. If the model reaches for one of these,
@@ -97,8 +98,12 @@ def template(request: ExplainRequest) -> str:
     numbers = [n for n in _comparable(request.row_values, cell.value)
                if n != cell.value]
     if len(numbers) >= 3:
-        parts.append(f"Other values in this row run from {min(numbers):,.0f} "
-                     f"to {max(numbers):,.0f}")
+        # Speak the numbers the way the sheet shows them. "91,000" loses the euro
+        # sign the listener can see on every other cell in the row.
+        unit = unit_of(cell.display) if cell.display else ""
+        symbol = unit if len(unit) == 1 and not unit.isalnum() else ""
+        parts.append(f"Other values in this row run from {symbol}{min(numbers):,.0f} "
+                     f"to {symbol}{max(numbers):,.0f}")
     return _sentence(parts)
 
 
