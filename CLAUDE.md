@@ -349,11 +349,23 @@ export function isSupported()          // false without Web Audio; app.js falls 
 - `label` — `"Italy, January to December"`, spoken before the tones
 - `unit` — `"€"`, so the spoken scale line reads `€62,000 to €154,000`
 
-**Normalising.** Map the series' own minimum and maximum onto the pitch range, **per
-series**: you only ever hear one at a time, chosen by where the cursor is, exactly as
-in Explore. (If several are ever played together, they must be normalised across the
-whole set instead — otherwise a small row and a large row both span the full range
-and sound the same height, which is actively misleading.)
+**Normalising: across the sheet, never per row.** The point of Trend Scan is comparing
+rows by ear -- play Italy, then play Germany, and hear which is larger. Stretching each
+row to fill the pitch range on its own destroys exactly that: a small country and a
+large one both span two octaves and sound the same height. Pitch must mean the same
+thing every time it is heard, or rows cannot be compared at all.
+
+So the scale is fixed for the whole sheet, taken from the main comparable column group
+(the same grouping the attention engine uses, so a growth ratio never sets the scale
+for revenue):
+
+- Map the **5th to 95th percentile** of all values in that group onto the pitch range,
+  and clamp anything outside to the top or bottom note. A single outlier -- Germany's
+  390,000 -- would otherwise squash every other row into the bottom of the range.
+- A flat row therefore sounds flat, and a row sitting low sounds low. That is correct:
+  it is the information.
+- The spoken line before the tones still names **that row's own** minimum and maximum,
+  so the listener gets its absolute magnitude as well as its position in the sheet.
 
 **What makes it sound like information rather than noise:**
 
