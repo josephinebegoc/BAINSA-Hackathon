@@ -55,7 +55,7 @@ const HELP_TEXT =
   "Space or N jumps to the next flagged cell; with Shift, the previous one. " +
   "W explains why a cell was flagged. D describes everything about a cell. " +
   "R reads the whole row, C the whole column. " +
-  "1 is Explore mode, 2 is Concise mode, 3 is Trend Scan. " +
+  "1 is Explore mode, 2 is Concise mode, 3 is Sound Graph. " +
   "F changes which cues you hear. " +
   "L loads the demo sheet. U uploads your own spreadsheet. Escape stops speaking.";
 
@@ -65,8 +65,11 @@ const MODES = {
   explore: { name: "Explore", says: "Explore mode. Full context for every cell." },
   concise: { name: "Concise", says: "Concise mode. Values only; cues still speak." },
   scan: {
-    name: "Trend Scan",
-    says: "Trend Scan. Numbers are silent. R plays the row as tones, C the column.",
+    // "Trend Scan" in CLAUDE.md and sonify.js; people see and hear "Sound Graph".
+    name: "Sound Graph",
+    says:
+      "Sound Graph. Numbers are silent. R plays the row as tones, C the column. " +
+      "Higher values play higher notes.",
   },
 };
 // F cycles these. A filter scopes both where N and Space go and which cells chime.
@@ -547,7 +550,7 @@ function setMode(mode) {
     // The contract: without Trend Scan, fall back to Concise.
     state.mode = "concise";
     showModeLine();
-    voice.announce("Trend Scan isn't available yet, so I'll use Concise mode. Values only; cues still speak.");
+    voice.announce("Sound Graph isn't available yet, so I'll use Concise mode. Values only; cues still speak.");
     return;
   }
   state.mode = mode;
