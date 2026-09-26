@@ -36,7 +36,7 @@ const HELP_TEXT =
   "Arrow keys move one cell. O gives an overview. " +
   "Space goes to the first flagged cell. " +
   "N jumps to the next flagged cell, Shift N to the previous one. " +
-  "W explains why a cell was flagged. " +
+  "W explains why a cell was flagged. D describes everything about a cell. " +
   "R reads the whole row, C the whole column. Escape stops speaking.";
 
 // Hovering announces the cell under the mouse, at most this often.
@@ -321,10 +321,87 @@ function describeCell(row, col, { cueFirst = false } = {}) {
     parts.push(contextPhrase(label, header, cell));
   }
 
+  const looks = formattingWords(row, col, cell);
+  if (looks.length) parts.push(sentenceCase(looks.join(", ")));
+
   const types = [...new Set((cell?.signals || []).map((s) => s.type))];
   const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
   const ordered = cueFirst ? [...cueNames, ...parts] : [...parts, ...cueNames];
   return ordered.join(". ") + ".";
+}
+
+// ---------- What it looks like (the author's visual vocabulary) ----------
+
+// Nearest plain colour word for an ARGB hex. Never read hex codes aloud.
+function colourName(argb) {
+  const hex = (argb || "").slice(-6);
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const light = (max + min) / 2;
+  const spread = max - min;
+  if (spread < 0.12) return light < 0.2 ? "black" : light > 0.85 ? "white" : "grey";
+
+  let hue;
+  if (max === r) hue = (((g - b) / spread + 6) % 6) * 60;
+  else if (max === g) hue = ((b - r) / spread + 2) * 60;
+  else hue = ((r - g) / spread + 4) * 60;
+  if (hue < 15 || hue >= 345) return "red";
+  if (hue < 45) return "orange";
+  if (hue < 70) return "yellow";
+  if (hue < 165) return "green";
+  if (hue < 255) return "blue";
+  if (hue < 290) return "purple";
+  return "pink";
+}
+
+// What a sighted person would notice about a cell, in short words.
+// everything=false (navigation): only what stands out at a glance. Bold headers
+// and labels, borders and conditional formatting are too common to repeat on
+// every cell. everything=true (the D key): all of it.
+function formattingWords(row, col, cell, { everything = false } = {}) {
+  if (!cell) return [];
+  const words = [];
+  const structural = row === state.sheet.header_row || col === state.sheet.label_col;
+
+  if (cell.fill) {
+    const colour = cell.fill === "unknown-non-default" ? null : colourName(cell.fill);
+    words.push(colour ? `highlighted ${colour}` : "highlighted");
+  }
+  // Excel often stores ordinary black text as a theme colour, which reaches us
+  // as "unknown-non-default"; only a colour we can actually name is announced.
+  const text = colourName(cell.font_color);
+  if (text && text !== "black") words.push(`${text} text`);
+  if (cell.bold && (everything || !structural)) words.push("bold");
+  if (cell.italic) words.push("italic");
+  if (cell.underline) words.push("underlined");
+  if (cell.strike) words.push("crossed out");
+  if (everything) {
+    if (cell.bordered) words.push("has a border");
+    if (cell.conditional) words.push("has conditional formatting");
+  } else if (cell.comment) {
+    words.push("has a note");
+  }
+  return words;
+}
+
+function sentenceCase(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// "=(M8-L8)/L8" → "M8 minus L8 divided by L8"
+function spokenFormula(formula) {
+  return formula
+    .replace(/^=/, "")
+    .replace(/:/g, " to ")
+    .replace(/\//g, " divided by ")
+    .replace(/\*/g, " times ")
+    .replace(/\+/g, " plus ")
+    .replace(/(?<=[\w)])\s*-/g, " minus ")
+    .replace(/[(),]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // The cue's sound plays first; speech waits until it has finished.
@@ -394,7 +471,7 @@ function explainFocus() {
   const { row, col } = state.focus;
   const cell = cellAt(row, col);
   if (!cell?.signals.length) {
-    voice.announce("No cues on this cell.");
+    voice.announce("No cues on this cell. Press D to describe it.");
     return;
   }
   const where = [cell.row_label || rowLabel(row), cell.col_header || colHeader(col)]
@@ -402,6 +479,31 @@ function explainFocus() {
     .join(", ");
   const reasons = cell.signals.map((s) => s.detail).join(". ");
   voice.announce(`${where}. ${reasons}.`);
+}
+
+// D: everything a sighted person could see about this cell, flagged or not.
+// "Anything visible is theirs to have."
+function describeFocus() {
+  const { row, col } = state.focus;
+  const cell = cellAt(row, col);
+  const out = [`${columnLetter(col)}${row}`];
+
+  if (!cell || (cell.display === "" && !cell.error)) out.push("Empty");
+  else if (cell.error) out.push(`Shows an error: ${spokenValue(cell).toLowerCase()}`);
+  else out.push(`Shows ${cell.display}`);
+
+  if (cell?.formula) out.push(`Calculated by the formula ${spokenFormula(cell.formula)}`);
+
+  const looks = formattingWords(row, col, cell, { everything: true });
+  out.push(looks.length ? `Formatting: ${looks.join(", ")}` : "No special formatting");
+
+  if (cell?.comment) out.push(`Note: ${cell.comment}`);
+
+  const types = [...new Set((cell?.signals || []).map((s) => s.type))];
+  if (types.length) {
+    out.push(`Cues: ${types.map((t) => SIGNAL_NAMES[t].toLowerCase()).join(", ")}. Press W for why`);
+  }
+  voice.announce(out.join(". ") + ".");
 }
 
 // R: "Italy. Jan, €80,000. Feb, €81,200. …"
@@ -448,6 +550,7 @@ const KEY_ACTIONS = {
   o: speakOverview,
   w: explainFocus,
   "?": explainFocus,
+  d: describeFocus,
   r: readRow,
   c: readColumn,
   h: () => voice.announce(HELP_TEXT),
