@@ -357,7 +357,8 @@ function topSignal(cell) {
   return SIGNAL_PRIORITY.find((t) => types.includes(t)) || null;
 }
 
-// "Author visual cue. D5. Spain's sales in March are €63,400. Highlighted red."
+// "Author visual cue: Author highlighted this cell in red. D5. Spain's sales in
+// March are €63,400."
 // The cue name comes first, so the listener knows what kind of cell this is
 // before hearing its value.
 function describeCell(row, col) {
@@ -374,12 +375,26 @@ function describeCell(row, col) {
     parts.push(contextPhrase(label, header, cell));
   }
 
-  const looks = formattingWords(row, col, cell);
+  const signals = cell?.signals || [];
+  let looks = formattingWords(row, col, cell);
+  // The author's cue already says "highlighted in red": don't say it twice.
+  if (signals.some((s) => s.type === "visual" && /highlight/i.test(s.detail))) {
+    looks = looks.filter((w) => !w.startsWith("highlighted"));
+  }
   if (looks.length) parts.push(sentenceCase(looks.join(", ")));
 
-  const types = [...new Set((cell?.signals || []).map((s) => s.type))];
-  const cueNames = types.map((t) => SIGNAL_NAMES[t] || t);
-  return [...cueNames, ...parts].join(". ") + ".";
+  return [...signals.map((s) => cueWithFact(s, cell)), ...parts].join(". ") + ".";
+}
+
+// "Pattern cue: Falls 60% after 6 months of rises". The engine's detail is a
+// fact, not a verdict, so it can be said straight away; W adds more context.
+// An error cell already says its error ("has an error: division by zero"),
+// so its cue is just the name.
+function cueWithFact(signal, cell) {
+  const name = SIGNAL_NAMES[signal.type] || signal.type;
+  const fact = (signal.detail || "").trim().replace(/\.$/, "");
+  if (!fact || (signal.type === "error" && cell?.error)) return name;
+  return `${name}: ${fact}`;
 }
 
 // ---------- What it looks like (the author's visual vocabulary) ----------
