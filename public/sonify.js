@@ -11,14 +11,30 @@
 
 const AudioCtx = window.AudioContext || window.webkitAudioContext;
 
-const LOW_HZ = 220; // two octaves: wide enough to hear differences, never shrill
-const HIGH_HZ = 880;
-const NOTE_MS = 150; // twelve months lands near two seconds: one shape, not a list
+let LOW_HZ = 220; // two octaves: wide enough to hear differences, never shrill
+let HIGH_HZ = 880;
+// 150 ms was too quick to follow: a run of tones blurred into one noise instead of a
+// shape. 280 ms puts twelve months at about 3.4 seconds, still short enough to hold
+// in your head, and leaves a real gap between notes so each pitch is separable.
+let NOTE_MS = 280;
+let NOTE_GAP_MS = 70; // silence between notes, so they don't run together
+let GAIN = 0.5; // sine tones are quiet for their amplitude; this is not timid
 const ERROR_HZ = 110; // a rough low buzz, clearly not part of the melody
 
 let ctx = null;
 let scale = null; // { low, high } in the sheet's own units
 let scheduled = []; // live nodes, so stop() can cut them off
+
+// Tuning, so the sound can be adjusted by ear on sonify-test.html rather than
+// through a deploy for every guess. The defaults above are what ships.
+export function configure({ noteMs, gapMs, gain, lowHz, highHz } = {}) {
+  if (noteMs) NOTE_MS = noteMs;
+  if (gapMs !== undefined) NOTE_GAP_MS = gapMs;
+  if (gain) GAIN = gain;
+  if (lowHz) LOW_HZ = lowHz;
+  if (highHz) HIGH_HZ = highHz;
+  return { noteMs: NOTE_MS, gapMs: NOTE_GAP_MS, gain: GAIN, lowHz: LOW_HZ, highHz: HIGH_HZ };
+}
 
 export function isSupported() {
   return Boolean(AudioCtx);
@@ -101,30 +117,44 @@ export function describe({ values, label, unit } = {}) {
   return label ? `${label}. ${low} to ${high}.` : `${low} to ${high}.`;
 }
 
-function note({ at, freq, ms, pan, wave = "sine", gain = 0.22 }) {
-  const osc = ctx.createOscillator();
-  const amp = ctx.createGain();
-  osc.type = wave;
-  osc.frequency.setValueAtTime(freq, at);
+// One note. A triangle wave carries a quiet octave partner, because a pure sine is
+// the hardest timbre there is to follow by pitch -- the overtones give the ear
+// something to hold on to, which is the whole point here.
+function note({ at, freq, ms, pan, wave = "triangle", gain = GAIN }) {
+  const seconds = ms / 1000;
 
-  // Short fades, so notes don't click at their edges.
-  amp.gain.setValueAtTime(0.0001, at);
-  amp.gain.exponentialRampToValueAtTime(gain, at + 0.012);
-  amp.gain.exponentialRampToValueAtTime(0.0001, at + ms / 1000);
-
-  let tail = amp;
+  let destination = ctx.destination;
   if (ctx.createStereoPanner) {
     const panner = ctx.createStereoPanner();
     panner.pan.setValueAtTime(pan, at);
-    amp.connect(panner);
-    tail = panner;
+    panner.connect(ctx.destination);
+    destination = panner;
+    scheduled.push(panner);
   }
-  tail.connect(ctx.destination);
-  osc.connect(amp);
 
-  osc.start(at);
-  osc.stop(at + ms / 1000 + 0.02);
-  scheduled.push(osc);
+  const voices = wave === "square"
+    ? [{ type: "square", freq, level: 1 }]
+    : [{ type: wave, freq, level: 1 }, { type: "sine", freq: freq * 2, level: 0.28 }];
+
+  for (const voice of voices) {
+    const osc = ctx.createOscillator();
+    const amp = ctx.createGain();
+    osc.type = voice.type;
+    osc.frequency.setValueAtTime(voice.freq, at);
+
+    // Attack, then hold at full volume, then release. The old envelope faded across
+    // the whole note, so no note ever actually reached its level.
+    const peak = gain * voice.level;
+    amp.gain.setValueAtTime(0.0001, at);
+    amp.gain.exponentialRampToValueAtTime(peak, at + 0.015);
+    amp.gain.setValueAtTime(peak, at + seconds - 0.05);
+    amp.gain.exponentialRampToValueAtTime(0.0001, at + seconds);
+
+    osc.connect(amp).connect(destination);
+    osc.start(at);
+    osc.stop(at + seconds + 0.02);
+    scheduled.push(osc);
+  }
 }
 
 // Play one row or column. Entries may be numbers, null for an empty cell, or a
@@ -158,10 +188,10 @@ function schedule(values, onDone) {
     const pan = last === 0 ? 0 : -0.8 + (1.6 * index) / last;
 
     if (isNumber(value)) {
-      note({ at, freq: frequencyFor(value), ms: NOTE_MS - 20, pan });
+      note({ at, freq: frequencyFor(value), ms: NOTE_MS - NOTE_GAP_MS, pan });
     } else if (typeof value === "string" && value.trim()) {
       // An error cell: a rough low buzz nobody mistakes for a pitch.
-      note({ at, freq: ERROR_HZ, ms: NOTE_MS - 20, pan, wave: "square", gain: 0.16 });
+      note({ at, freq: ERROR_HZ, ms: NOTE_MS - NOTE_GAP_MS, pan, wave: "square", gain: 0.3 });
     }
     // An empty cell is silence, which reads correctly as a gap.
   });
