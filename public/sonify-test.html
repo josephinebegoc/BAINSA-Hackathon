@@ -24,12 +24,15 @@
     <label>Lowest pitch <input id="lowHz" type="range" min="60" max="440" step="10" value="110"><span id="lowHzV">110</span> Hz</label><br>
     <label>Highest pitch <input id="highHz" type="range" min="440" max="3000" step="20" value="1760"><span id="highHzV">1760</span> Hz</label><br>
     <label>Shape vs register <input id="localSpan" type="range" min="0.05" max="0.7" step="0.01" value="0.34"><span id="localSpanV">0.34</span></label>
-    <br><small>Left: rows sit further apart, shapes flatter. Right: shapes bigger, rows harder to tell apart.</small>
+    <br><small>Left: rows sit further apart, shapes flatter. Right: shapes bigger, rows harder to tell apart.</small><br>
+    <label>Loudness evening <input id="tilt" type="range" min="0" max="1" step="0.05" value="0.5"><span id="tiltV">0.5</span></label>
+    <br><small>0 = no correction (low notes sound quieter). Higher = low notes boosted so only the pitch changes.</small>
   </div>
 
   <button id="rise">Steady climb (should rise evenly)</button>
   <button id="italy">Italy: climbs then falls off a cliff</button>
   <button id="small">A smaller country (should sound lower overall)</button>
+  <button id="ramp">Low to high sweep (should change pitch, not volume)</button>
   <button id="stop">Stop</button>
 
   <div id="log">loading…</div>
@@ -59,12 +62,12 @@ say("setScale() with " + sheet.length + " values -> hasScale(): " + s.hasScale()
 // Live tuning: move a slider, press a button, hear the difference immediately.
 const tune = () => {
   const num = (id) => Number(document.getElementById(id).value);
-  for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan"])
+  for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan", "tilt"])
     document.getElementById(id + "V").textContent = document.getElementById(id).value;
   s.configure({ noteMs: num("noteMs"), gain: num("gain"), lowHz: num("lowHz"),
-                highHz: num("highHz"), localSpan: num("localSpan") });
+                highHz: num("highHz"), localSpan: num("localSpan"), tilt: num("tilt") });
 };
-for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan"])
+for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan", "tilt"])
   document.getElementById(id).addEventListener("input", tune);
 tune();
 say("Move the sliders, then press a button. Tell Margaux the numbers that sound right.");
@@ -84,6 +87,12 @@ document.getElementById("italy").onclick = () =>
 
 document.getElementById("small").onclick = () =>
   play([70000, 72000, 74000, 71000, 75000, 73000, 76000, 74000], "A smaller country");
+
+document.getElementById("ramp").onclick = () => {
+  // One row spanning the whole scale: if any note stands out as louder or fainter
+  // rather than higher or lower, the loudness evening needs adjusting.
+  play([82000, 100000, 118000, 136000, 154000, 172000, 190000, 208000], "Low to high sweep");
+};
 
 document.getElementById("stop").onclick = () => { s.stop(); say("stopped"); };
 </script>

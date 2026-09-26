@@ -78,6 +78,21 @@ console.log("\nregister and shape together:");
   ok("a row of nothing does not throw", s.frequenciesFor([null, null]).every((f) => f === null));
 }
 
+console.log("\nloudness is evened out, so only pitch carries meaning:");
+{
+  const bottom = s.gainFor(110);
+  const top = s.gainFor(1760);
+  ok("a high note has a smaller amplitude than a low one", top < bottom);
+  ok("it is a real correction, not a token one", bottom / top > 2);
+  ok("but not so severe the top note vanishes", bottom / top < 12);
+  const steps = [110, 220, 440, 880, 1760].map(s.gainFor);
+  ok("amplitude falls monotonically with pitch",
+     steps.every((g, i) => i === 0 || g < steps[i - 1]));
+  s.configure({ tilt: 0 });
+  ok("tilt 0 turns the correction off", Math.abs(s.gainFor(110) - s.gainFor(1760)) < 1e-9);
+  s.configure({ tilt: 0.5 });
+}
+
 console.log("\ndescribe() gives the listener the magnitude:");
 const line = s.describe({ values: [100000, 62000, 154000, null], label: "Italy, January to December", unit: "€" });
 console.log(`     "${line}"`);
