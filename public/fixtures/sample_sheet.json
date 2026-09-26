@@ -31,7 +31,8 @@
     "Poland",
     "Sweden"
   ],
-  "overview": "Sales Performance 2026. 8 rows of countries by 14 columns, from Country to Growth %. Overall, values rise. I found 4 areas that may deserve your attention: 1 highlighted cell, 1 unusual value, 1 trend change, and 1 formula error.",
+  "value_label": "sales",
+  "overview": "Sales Performance 2026. 8 rows of countries by 14 columns, from Country to Growth %. Overall, values rise. I found 3 areas that may deserve your attention: 1 highlighted cell, 1 trend change and 1 formula error.",
   "cells": [
     {
       "ref": "A1",
@@ -507,13 +508,7 @@
       "bold": false,
       "formula": null,
       "error": null,
-      "signals": [
-        {
-          "type": "anomaly",
-          "severity": "medium",
-          "detail": "64% below Italy's median"
-        }
-      ]
+      "signals": []
     },
     {
       "ref": "G3",
@@ -1825,7 +1820,6 @@
   "attention_order": [
     "D5",
     "N8",
-    "F3",
     "G4"
   ]
 }

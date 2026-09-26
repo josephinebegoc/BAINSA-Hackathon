@@ -58,12 +58,18 @@ differentiator. Anything that only works as a one-off report is off-message.
 The four signal types are four *kinds of information being recovered*, not four
 statistics. Keep this vocabulary in the pitch and the UI:
 
-| Cue | Signal `type` | Sounds like |
-|---|---|---|
-| **Author visual cue** | `visual` | "The author highlighted this red." |
-| **Statistical cue** | `anomaly` | "61% below Italy's median." |
-| **Pattern cue** | `trend` | "Falls 45% after four months of rises." |
-| **Functional cue** | `error` | "This cell contains a division-by-zero error." |
+| Cue | Signal `type` | Sounds like | Status |
+|---|---|---|---|
+| **Author visual cue** | `visual` | "The author highlighted this red." | announced |
+| **Pattern cue** | `trend` | "Falls 45% after four months of rises." | announced |
+| **Functional cue** | `error` | "This cell contains a division-by-zero error." | announced |
+| **Statistical cue** | `anomaly` | "61% below Italy's median." | **off for now** |
+
+**The statistical cue is switched off.** Saying a value is far from its median is us
+computing a judgement about it, not reporting something that is in the sheet. The
+rule is kept and still tested; `find_signals(..., include_statistical=True)` turns it
+back on, and that one flag is the whole change. Decided by Margaux; revisit if the
+pitch needs it.
 
 Note the phrasing: each one states what is there, not what to think about it. "This
 value is unusually low" would be us doing the analysing.
@@ -187,6 +193,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
   "header_row": 1, "label_col": 1,
   "col_headers": ["Country", "Jan", "Feb", "...", "Dec", "Growth %"],
   "row_labels": ["France", "Italy", "..."],
+  "value_label": "sales",
   "overview": "This sheet contains monthly revenue for eight countries...",
   "cells": [
     {
@@ -208,6 +215,7 @@ Vercel limits: request bodies max ~4.5 MB (reject larger files with a spoken mes
 
 - Load the workbook **twice**: `data_only=False` to get formulas, `data_only=True` to get cached values and errors.
 - **Gotcha:** openpyxl never calculates formulas. A file written by openpyxl has no cached values, so `#DIV/0!` will not appear. The demo file must be recalculated and saved by a spreadsheet app (see Demo data below).
+- `value_label`: what the numbers measure ("revenue", "hours"), for announcements like "Italy. May. Sales. €121,000." **Only ever a word the author actually wrote** in the title or a header — never inferred from the data, the number format or the column names' shape. A sheet that never says what its numbers are gets `""`, and the app stays quiet about it rather than guessing.
 - Header detection (keep it simple): the first non-empty row where most cells are strings is the header row. The first column with mostly strings below it holds the row labels. Use the sheet title, or cell A1 if it is a lone title, as `title`.
 - Capture per cell: value, formatted display (respect the number format where easy, otherwise format numbers sensibly), fill colour (`cell.fill.fgColor.rgb` when `fill_type == "solid"`), font colour, bold, formula, error string (`#DIV/0!`, `#N/A`, `#VALUE!`, `#REF!`, `#NAME?`).
 - **Capture the author's full visual vocabulary even before we announce all of it.**
@@ -225,7 +233,7 @@ Pure functions with no I/O, fully unit-tested. Four signal types:
 | Type | Rule (prototype) | Example detail |
 |---|---|---|
 | `visual` | non-default solid fill, or red/orange font; bold only if the rest of the row isn't bold | "Author highlighted this cell in red" |
-| `anomaly` | within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median, **or** more than 40% away from the row median regardless of z. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
+| `anomaly` | **Off by default.** Within its row series (see below), robust z-score using median/MAD > 3.5 **and** at least 15% away from the row median; distance from the median alone only when the spread is too degenerate for a z-score. Skip series with fewer than 4 numbers. | "43% below Italy's median" |
 | `trend` | at least 3 consecutive increases (or decreases) followed by a move in the opposite direction larger than 25% | "Breaks a 4-month upward trend" |
 | `error` | cell holds an Excel error value | "Formula error: division by zero" |
 

@@ -27,6 +27,18 @@ MAX_ROWS = 400          # keep the payload and the function well inside Vercel's
 MAX_COLS = 60
 
 MONTHS = {"jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
+
+# Words that name what a number measures. The label is only ever a word the author
+# actually wrote in the sheet -- we look for these, we never infer one. A sheet that
+# never says what its numbers are gets no label, and the app stays quiet about it.
+MEASURES = (
+    "revenue", "sales", "turnover", "profit", "loss", "margin", "income",
+    "cost", "costs", "expenses", "spend", "spending", "budget", "price",
+    "salary", "salaries", "wages", "units", "quantity", "volume", "count",
+    "headcount", "population", "score", "scores", "rating", "ratings",
+    "hours", "minutes", "days", "distance", "weight", "temperature",
+    "rainfall", "attendance", "orders", "visits", "clicks", "downloads",
+)
 WHITE = {"FFFFFFFF", "FFFFFF", "00FFFFFF"}
 BLACKISH = {"FF000000", "000000", "FF000000"}
 
@@ -166,6 +178,25 @@ def _data_end(grid: list[list[Any]], header_row: int) -> int:
     return last
 
 
+def _value_label(*sources: Any) -> str:
+    """What the numbers measure, if the sheet says so anywhere.
+
+    Looks through the title and the headers for a word that names a quantity, and
+    returns "" when it finds none. Only ever returns a word that is literally
+    written in the sheet: "European Sales 2026" gives "sales", and a sheet titled
+    "Sheet1" gives nothing at all.
+    """
+    for source in sources:
+        for text in (source if isinstance(source, (list, tuple)) else [source]):
+            if not isinstance(text, str):
+                continue
+            words = re.findall(r"[a-z]+", text.lower())
+            for measure in MEASURES:
+                if measure in words:
+                    return measure
+    return ""
+
+
 def _step_word(headers: list[str]) -> str | None:
     """What one step along a row means, if the headers say so."""
     lowered = [h.strip().lower()[:3] for h in headers if isinstance(h, str)]
@@ -246,12 +277,15 @@ def extract(source, sheet_index: int = 0) -> tuple[SheetModel, str | None]:
     _mark_conditional(sf, cells)
 
     title = _title(sf, name, grid, header_row)
+    # Title first: a column header like "Growth vs Jan" names one column, not the sheet.
+    value_label = _value_label(title, name, col_headers)
     model = SheetModel(
         id=f"{name}-{last_row}x{n_cols}",
         title=title,
         n_rows=last_row, n_cols=n_cols,
         header_row=header_row, label_col=label_col,
         col_headers=col_headers, row_labels=row_labels,
+        value_label=value_label,
         overview="", cells=cells, attention_order=[],
     )
     return model, _step_word(col_headers)

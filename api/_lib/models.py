@@ -72,6 +72,11 @@ class SheetModel(BaseModel):
     col_headers: list[str]        # includes the label column's own header
     row_labels: list[str]         # data rows only, in sheet order
 
+    # What the numbers measure ("revenue", "hours"), when the sheet says so
+    # somewhere -- in its title or a header. Empty when it doesn't, because
+    # guessing would be us inventing meaning the author never wrote down.
+    value_label: str = ""
+
     overview: str                 # ORIENT text, template version
 
     cells: list[Cell]
@@ -93,15 +98,22 @@ class ExplainRequest(BaseModel):
 
 
 class OverviewFacts(BaseModel):
-    """ORIENT: computed facts only. The LLM never sees the raw grid."""
+    """ORIENT: computed facts only. The LLM never sees the raw grid.
+
+    Everything here is measured or copied from the sheet. There is no field for
+    what the data means or how it is doing, because that is the user's to decide.
+    """
 
     title: str
-    n_data_rows: int
-    n_cols: int
-    row_label_kind: str = "rows"          # "countries"
-    first_col_header: str = ""
-    last_col_header: str = ""
-    direction: str = "stay flat"          # "rise" | "fall" | "stay flat"
+    value_label: str = ""                 # "sales", when the sheet says
+    n_data_rows: int = 0
+    n_cols: int = 0
+    first_col_header: str = ""            # the sheet's leftmost column, for shape
+    last_col_header: str = ""             # ...and its rightmost
+    first_value: str = ""                 # typical value in the main series
+    first_value_header: str = ""          # the column that value sits under
+    last_value: str = ""                  # ...and at the other end of that series
+    last_value_header: str = ""
     signal_counts: dict[str, int] = Field(default_factory=dict)
 
 
