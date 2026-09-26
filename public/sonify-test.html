@@ -19,10 +19,12 @@
      Click a button; you should hear tones.</p>
 
   <div id="tuning">
-    <label>Note length <input id="noteMs" type="range" min="100" max="600" step="20" value="280"><span id="noteMsV">280</span> ms</label><br>
+    <label>Note length <input id="noteMs" type="range" min="150" max="800" step="20" value="400"><span id="noteMsV">400</span> ms</label><br>
     <label>Volume <input id="gain" type="range" min="0.1" max="1" step="0.05" value="0.5"><span id="gainV">0.5</span></label><br>
-    <label>Lowest pitch <input id="lowHz" type="range" min="110" max="440" step="10" value="220"><span id="lowHzV">220</span> Hz</label><br>
-    <label>Highest pitch <input id="highHz" type="range" min="440" max="2000" step="20" value="880"><span id="highHzV">880</span> Hz</label>
+    <label>Lowest pitch <input id="lowHz" type="range" min="60" max="440" step="10" value="110"><span id="lowHzV">110</span> Hz</label><br>
+    <label>Highest pitch <input id="highHz" type="range" min="440" max="3000" step="20" value="1760"><span id="highHzV">1760</span> Hz</label><br>
+    <label>Shape vs register <input id="localSpan" type="range" min="0.05" max="0.7" step="0.01" value="0.34"><span id="localSpanV">0.34</span></label>
+    <br><small>Left: rows sit further apart, shapes flatter. Right: shapes bigger, rows harder to tell apart.</small>
   </div>
 
   <button id="rise">Steady climb (should rise evenly)</button>
@@ -57,11 +59,12 @@ say("setScale() with " + sheet.length + " values -> hasScale(): " + s.hasScale()
 // Live tuning: move a slider, press a button, hear the difference immediately.
 const tune = () => {
   const num = (id) => Number(document.getElementById(id).value);
-  for (const id of ["noteMs", "gain", "lowHz", "highHz"])
+  for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan"])
     document.getElementById(id + "V").textContent = document.getElementById(id).value;
-  s.configure({ noteMs: num("noteMs"), gain: num("gain"), lowHz: num("lowHz"), highHz: num("highHz") });
+  s.configure({ noteMs: num("noteMs"), gain: num("gain"), lowHz: num("lowHz"),
+                highHz: num("highHz"), localSpan: num("localSpan") });
 };
-for (const id of ["noteMs", "gain", "lowHz", "highHz"])
+for (const id of ["noteMs", "gain", "lowHz", "highHz", "localSpan"])
   document.getElementById(id).addEventListener("input", tune);
 tune();
 say("Move the sliders, then press a button. Tell Margaux the numbers that sound right.");
